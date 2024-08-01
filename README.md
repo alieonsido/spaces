@@ -1,9 +1,9 @@
 # <img src="/img/icon48.png" align="absmiddle"> Spaces
 
-### A Chrome extension for Intuitive tab management
+### A browser extension for Intuitive tab management
 
-Spaces is a workspace manager for chrome.
-It treats each chrome window like a different workspace and lets you name and save each space.
+Spaces is a workspace manager for chrome and edge.
+It treats each window like a different workspace and lets you name and save each space.
 You can close a window full of tabs at any time then reopen it later and continue exactly
 where you left off.
 
@@ -13,18 +13,18 @@ other space- whether it's open or closed.
 Great for when you find yourself opening a tab out of context with what you are currently
 working on and want to come back to it later.
 
-Spaces was developed to help users that tend to have way too many tabs open in a chrome window.
+Spaces was developed to help users that tend to have way too many tabs open in a window.
 It encourages you to move tabs that are not immediately relevant into a different,
 more appropriate space - thus removing it from your current window.
-This keeps your chrome session manageable - both visually and from a memory perspective.
+This keeps your browser session manageable - both visually and from a memory perspective.
 
 Isn't this essentially just bookmarks with folders? Yeah, pretty much - but who uses bookmarks?
 
-### Chrome Web Store
+<!-- ### Chrome Web Store
 
 Spaces is also [available via the official Chrome Web Store](https://chrome.google.com/webstore/detail/spaces/cenkmofngpohdnkbjdpilgpmbiiljjim).
 
-Please note that the webstore version may be behind the latest version here.
+Please note that the webstore version may be behind the latest version here. -->
 
 ### Install as an extension from source
 
