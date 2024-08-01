@@ -18,10 +18,10 @@ export var spacesService = {
     noop: () => {},
 
     // initialise spaces - combine open windows with saved sessions
-    initialiseSpaces: () => {
+    initialiseSpaces: async () => {
         // update version numbers
-        spacesService.lastVersion = spacesService.fetchLastVersion();
-        spacesService.setLastVersion(chrome.runtime.getManifest().version);
+        spacesService.lastVersion = await spacesService.fetchLastVersion();
+        await spacesService.setLastVersion(chrome.runtime.getManifest().version);
 
         dbService.fetchAllSessions(sessions => {
             if (
@@ -225,8 +225,8 @@ export var spacesService = {
     },
 
     // local storage getters/setters
-    fetchLastVersion: () => {
-        let version = localStorage.getItem('spacesVersion');
+    fetchLastVersion: async () => {
+        let version = await chrome.storage.local.get('spacesVersion');
         if (version !== null) {
             version = JSON.parse(version);
             return version;
@@ -234,8 +234,8 @@ export var spacesService = {
         return 0;
     },
 
-    setLastVersion: newVersion => {
-        localStorage.setItem('spacesVersion', JSON.stringify(newVersion));
+    setLastVersion: async newVersion => {
+        await chrome.storage.local.set('spacesVersion', JSON.stringify(newVersion));
     },
 
     // event listener functions for window and tab events
