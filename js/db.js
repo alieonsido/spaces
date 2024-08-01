@@ -1,7 +1,8 @@
 //The MIT License
 //Copyright (c) 2012 Aaron Powell
 
-(function(window, undefined) {
+// (function(window, undefined) {
+    const window = globalThis;
     'use strict';
 
     var indexedDB,
@@ -550,7 +551,7 @@
 
     var dbCache = {};
 
-    var db = {
+    export var db = {
         version: '0.9.2',
         open: function(options) {
             var request;
@@ -593,16 +594,16 @@
         },
     };
 
-    if (
-        typeof module !== 'undefined' &&
-        typeof module.exports !== 'undefined'
-    ) {
-        module.exports = db;
-    } else if (typeof define === 'function' && define.amd) {
-        define(function() {
-            return db;
-        });
-    } else {
-        window.db = db;
-    }
-})(window);
+//     if (
+//         typeof module !== 'undefined' &&
+//         typeof module.exports !== 'undefined'
+//     ) {
+//         module.exports = db;
+//     } else if (typeof define === 'function' && define.amd) {
+//         define(function() {
+//             return db;
+//         });
+//     } else {
+//         window.db = db;
+//     }
+// })(window);

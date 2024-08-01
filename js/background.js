@@ -6,6 +6,8 @@
  * Copyright (C) 2015 Dean Oemcke
  */
 
+import {spacesService} from './spacesService.js';
+
 // eslint-disable-next-line no-unused-vars, no-var
 var spaces = (() => {
     let spacesPopupWindowId = false;

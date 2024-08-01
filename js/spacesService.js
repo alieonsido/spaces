@@ -5,7 +5,7 @@
  */
 
 // eslint-disable-next-line no-var
-var spacesService = {
+export var spacesService = {
     tabHistoryUrlMap: {},
     closedWindowIds: {},
     sessions: [],
