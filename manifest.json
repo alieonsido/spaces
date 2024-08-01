@@ -8,33 +8,34 @@
         "storage",
         "history",
         "unlimitedStorage",
-        "chrome://favicon/*",
         "contextMenus"
     ],
+    "--removed permissions--": [
+        "chrome://favicon/*"
+    ],
     "background": {
-        "scripts": [
-            "js/db.js",
-            "js/dbService.js",
-            "js/spacesService.js",
-            "js/utils.js",
-            "js/background.js"
-        ],
-        "persistent": true
+        "service_worker": "js/background.js",
+        "type": "module"
     },
-    "browser_action": {
+    "action": {
         "default_title": "Spaces",
-        "default_icon": "img/icon128.png",
+        "default_icon": {
+            "16": "img/icon16.png",
+            "48": "img/icon48.png",
+            "128": "img/icon128.png"
+        },
         "default_popup": "popup.html"
     },
-    "options_page": "spaces.html",
+    "options_ui": {
+        "page": "spaces.html"
+    },
     "icons": {
         "16": "img/icon16.png",
         "48": "img/icon48.png",
         "128": "img/icon128.png"
     },
-    "web_accessible_resources": [],
-    "incognito": "split",
-    "manifest_version": 2,
+    "--incognito--": "split",
+    "manifest_version": 3,
     "minimum_chrome_version": "35",
 
     "commands": {
