@@ -1,6 +1,9 @@
 /* global db */
 // eslint-disable-next-line no-var
-var dbService = {
+
+import {db} from './db.js';
+
+export var dbService = {
     DB_SERVER: 'spaces',
     DB_VERSION: '1',
     DB_SESSIONS: 'ttSessions',

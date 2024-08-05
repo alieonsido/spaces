@@ -4,6 +4,8 @@
  * Copyright (C) 2015 Dean Oemcke
  */
 
+import { dbService } from "./dbService.js";
+
 // eslint-disable-next-line no-var
 export var spacesService = {
     tabHistoryUrlMap: {},
