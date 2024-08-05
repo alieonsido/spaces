@@ -228,8 +228,8 @@ export var spacesService = {
 
     // local storage getters/setters
     fetchLastVersion: async () => {
-        let version = await chrome.storage.local.get('spacesVersion');
-        if (version !== null) {
+        let {spacesVersion: version} = await chrome.storage.local.get('spacesVersion');
+        if (version != null) {
             version = JSON.parse(version);
             return version;
         }
@@ -237,7 +237,7 @@ export var spacesService = {
     },
 
     setLastVersion: async newVersion => {
-        await chrome.storage.local.set('spacesVersion', JSON.stringify(newVersion));
+        await chrome.storage.local.set({'spacesVersion': JSON.stringify(newVersion)});
     },
 
     // event listener functions for window and tab events
