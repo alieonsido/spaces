@@ -34,13 +34,8 @@
         const action = utils.getHashVariable('action', window.location.href);
 
         const requestSpacePromise = globalWindowId
-            ? new Promise(resolve =>
-                  spaces.requestSpaceFromWindowId(
-                      parseInt(globalWindowId, 10),
-                      resolve
-                  )
-              )
-            : new Promise(resolve => spaces.requestCurrentSpace(resolve));
+            ? spaces.requestSpaceFromWindowId(parseInt(globalWindowId, 10))
+            : spaces.requestCurrentSpace();
 
         requestSpacePromise.then(space => {
             globalCurrentSpace = space;
@@ -116,7 +111,7 @@
 
     function renderMainCard() {
         const { spaces } = chrome.extension.getBackgroundPage();
-        spaces.requestHotkeys(hotkeys => {
+        spaces.requestHotkeys().then(hotkeys => {
             document.querySelector(
                 '#switcherLink .hotkey'
             ).innerHTML = hotkeys.switchCode ? hotkeys.switchCode : NO_HOTKEY;

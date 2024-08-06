@@ -196,10 +196,10 @@ var spaces = (() => {
                     if (checkInternalSpacesWindows(windowId, false)) {
                         sendResponse(false);
                     } else {
-                        requestSpaceFromWindowId(windowId, sendResponse);
+                        requestSpaceFromWindowId(windowId).then(r => {sendResponse(r)});
                     }
                 } else if (sessionId) {
-                    requestSpaceFromSessionId(sessionId, sendResponse);
+                    requestSpaceFromSessionId(sessionId).then(r => {sendResponse(r)});
                 }
                 return true;
 
@@ -212,7 +212,7 @@ var spaces = (() => {
                 return true;
 
             case 'requestHotkeys':
-                requestHotkeys(sendResponse);
+                requestHotkeys().then(r => {sendResponse(r)});
                 return true;
 
             case 'requestTabDetail':
@@ -474,9 +474,7 @@ var spaces = (() => {
 
     async function generatePopupParams(action, tabUrl) {
         // get currently highlighted tab
-        const tabs = await new Promise(resolve => {
-            chrome.tabs.query({ active: true, currentWindow: true }, resolve);
-        });
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs.length === 0) return '';
 
         const activeTab = tabs[0];
@@ -621,8 +619,8 @@ var spaces = (() => {
         );
     }
 
-    function requestHotkeys(callback) {
-        chrome.commands.getAll(commands => {
+    async function requestHotkeys() {
+        const commands = await chrome.commands.getAll();
             let switchStr;
             let moveStr;
             let spacesStr;
@@ -637,55 +635,53 @@ var spaces = (() => {
                 }
             });
 
-            callback({
+        return {
                 switchCode: switchStr,
                 moveCode: moveStr,
                 spacesCode: spacesStr,
-            });
-        });
+        };
     }
 
     function requestTabDetail(tabId, callback) {
         chrome.tabs.get(tabId, callback);
     }
 
-    function requestCurrentSpace(callback) {
-        chrome.windows.getCurrent(window => {
-            requestSpaceFromWindowId(window.id, callback);
-        });
+    async function requestCurrentSpace() {
+        const window = await chrome.windows.getCurrent();
+        return await requestSpaceFromWindowId(window.id);
     }
 
     // returns a 'space' object which is essentially the same as a session object
     // except that includes space.sessionId (session.id) and space.windowId
-    function requestSpaceFromWindowId(windowId, callback) {
+    async function requestSpaceFromWindowId(windowId) {
         // first check for an existing session matching this windowId
         const session = spacesService.getSessionByWindowId(windowId);
 
         if (session) {
-            callback({
+            return {
                 sessionId: session.id,
                 windowId: session.windowId,
                 name: session.name,
                 tabs: session.tabs,
                 history: session.history,
-            });
+            };
 
             // otherwise build a space object out of the actual window
         } else {
-            chrome.windows.get(windowId, { populate: true }, window => {
+            let window;
+            try {
+                window = await chrome.windows.get(windowId, { populate: true });
+            } catch(e) {
                 // if failed to load requested window
-                if (chrome.runtime.lastError) {
-                    callback(false);
-                } else {
-                    callback({
+                return false;
+            }
+            return {
                         sessionId: false,
                         windowId: window.id,
                         name: false,
                         tabs: window.tabs,
                         history: false,
-                    });
-                }
-            });
+            };
         }
     }
 
