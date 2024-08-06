@@ -12,9 +12,9 @@ import { createBackgroundEndpoint, isMessagePort } from '../build/comlink-extens
 
 // TODO service worker doesn't have access to DOM's `screen` so we stub it here
 const screen = {
-    width: 500,
-    height: 500,
-}
+    width: 1000,
+    height: 1000,
+};
 
 // eslint-disable-next-line no-unused-vars, no-var
 var spaces = (() => {
@@ -108,6 +108,11 @@ var spaces = (() => {
         let sessionId;
         let windowId;
         let tabId;
+
+        if(request.screen) {
+            screen.width = request.screen.width;
+            screen.height = request.screen.height;
+        }
 
         // endpoints called by spaces.js
         switch (request.action) {
@@ -396,12 +401,22 @@ var spaces = (() => {
     });
 
     // add context menu entry
-
-    chrome.contextMenus.create({
-        id: 'spaces-add-link',
-        title: 'Add link to space...',
-        contexts: ['link'],
-    });
+    // TODO correct way is once in runtime.onInstalled?
+    (async () => {
+        try {
+            await chrome.contextMenus.create({
+                id: 'spaces-add-link',
+                title: 'Add link to space...',
+                contexts: ['link'],
+            });
+        } catch (e) {
+            await chrome.contextMenus.update({
+                id: 'spaces-add-link',
+                title: 'Add link to space...',
+                contexts: ['link'],
+            });
+        }
+    })();
     chrome.contextMenus.onClicked.addListener(info => {
         // handle showing the move tab popup (tab.html)
         if (info.menuItemId === 'spaces-add-link') {
@@ -608,23 +623,28 @@ var spaces = (() => {
         return false;
     }
 
-    function checkSessionOverwrite(session) {
+    async function checkSessionOverwrite(session) {
         // make sure session being overwritten is not currently open
         if (session.windowId) {
-            alert(
-                `A session with the name '${session.name}' is currently open an cannot be overwritten`
-            );
+            await chrome.runtime.sendMessage({
+                action: 'uiAlert',
+                message: `A session with the name '${session.name}' is currently open an cannot be overwritten`
+            });
             return false;
 
             // otherwise prompt to see if user wants to overwrite session
         }
-        return window.confirm(`Replace existing space: ${session.name}?`);
+        return await chrome.runtime.sendMessage({
+            action: 'uiConfirm',
+            message: `Replace existing space: ${session.name}?`
+        });
     }
 
-    function checkSessionDelete(session) {
-        return window.confirm(
-            `Are you sure you want to delete the space: ${session.name}?`
-        );
+    async function checkSessionDelete(session) {
+        return await chrome.runtime.sendMessage({
+            action: 'uiConfirm',
+            message: `Are you sure you want to delete the space: ${session.name}?`
+        });
     }
 
     async function requestHotkeys() {
@@ -693,16 +713,16 @@ var spaces = (() => {
         }
     }
 
-    function requestSpaceFromSessionId(sessionId, callback) {
+    async function requestSpaceFromSessionId(sessionId) {
         const session = spacesService.getSessionBySessionId(sessionId);
 
-        callback({
+        return {
             sessionId: session.id,
             windowId: session.windowId,
             name: session.name,
             tabs: session.tabs,
             history: session.history,
-        });
+        };
     }
 
     function requestAllSpaces(callback) {
@@ -833,12 +853,13 @@ var spaces = (() => {
     }
 
     function handleSaveNewSession(windowId, sessionName, callback) {
-        chrome.windows.get(windowId, { populate: true }, curWindow => {
+        (async () => {
+            const curWindow = await chrome.windows.get(windowId, { populate: true });
             const existingSession = spacesService.getSessionByName(sessionName);
 
             // if session with same name already exist, then prompt to override the existing session
             if (existingSession) {
-                if (!checkSessionOverwrite(existingSession)) {
+                if (!await checkSessionOverwrite(existingSession)) {
                     callback(false);
                     return;
 
@@ -852,46 +873,48 @@ var spaces = (() => {
                 curWindow.id,
                 callback
             );
-        });
+        })();
     }
 
     function handleRestoreFromBackup(_spaces, callback) {
-        let existingSession;
-        let performSave;
+        (async () => {
+            let existingSession;
+            let performSave;
 
-        const promises = [];
-        for (let i = 0; i < _spaces.length; i += 1) {
-            const space = _spaces[i];
-            existingSession = space.name
-                ? spacesService.getSessionByName(space.name)
-                : false;
-            performSave = true;
+            const promises = [];
+            for (let i = 0; i < _spaces.length; i += 1) {
+                const space = _spaces[i];
+                existingSession = space.name
+                    ? spacesService.getSessionByName(space.name)
+                    : false;
+                performSave = true;
 
-            // if session with same name already exist, then prompt to override the existing session
-            if (existingSession) {
-                if (!checkSessionOverwrite(existingSession)) {
-                    performSave = false;
+                // if session with same name already exist, then prompt to override the existing session
+                if (existingSession) {
+                    if (!await checkSessionOverwrite(existingSession)) {
+                        performSave = false;
 
-                    // if we choose to overwrite, delete the existing session
-                } else {
-                    handleDeleteSession(existingSession.id, true, noop);
+                        // if we choose to overwrite, delete the existing session
+                    } else {
+                        handleDeleteSession(existingSession.id, true, noop);
+                    }
+                }
+
+                if (performSave) {
+                    promises.push(
+                        new Promise(resolve => {
+                            spacesService.saveNewSession(
+                                space.name,
+                                space.tabs,
+                                false,
+                                resolve
+                            );
+                        })
+                    );
                 }
             }
-
-            if (performSave) {
-                promises.push(
-                    new Promise(resolve => {
-                        spacesService.saveNewSession(
-                            space.name,
-                            space.tabs,
-                            false,
-                            resolve
-                        );
-                    })
-                );
-            }
-        }
-        Promise.all(promises).then(callback);
+            Promise.all(promises).then(callback);
+        })();
     }
 
     function handleImportNewSession(urlList, callback) {
@@ -913,29 +936,33 @@ var spaces = (() => {
     }
 
     function handleUpdateSessionName(sessionId, sessionName, callback) {
-        // check to make sure session name doesn't already exist
-        const existingSession = spacesService.getSessionByName(sessionName);
+        (async () => {
+            // check to make sure session name doesn't already exist
+            const existingSession = spacesService.getSessionByName(sessionName);
 
-        // if session with same name already exist, then prompt to override the existing session
-        if (existingSession && existingSession.id !== sessionId) {
-            if (!checkSessionOverwrite(existingSession)) {
-                callback(false);
-                return;
+            // if session with same name already exist, then prompt to override the existing session
+            if (existingSession && existingSession.id !== sessionId) {
+                if (!await checkSessionOverwrite(existingSession)) {
+                    callback(false);
+                    return;
 
-                // if we choose to override, then delete the existing session
+                    // if we choose to override, then delete the existing session
+                }
+                handleDeleteSession(existingSession.id, true, noop);
             }
-            handleDeleteSession(existingSession.id, true, noop);
-        }
-        spacesService.updateSessionName(sessionId, sessionName, callback);
+            spacesService.updateSessionName(sessionId, sessionName, callback);
+        })();
     }
 
     function handleDeleteSession(sessionId, force, callback) {
-        const session = spacesService.getSessionBySessionId(sessionId);
-        if (!force && !checkSessionDelete(session)) {
-            callback(false);
-        } else {
-            spacesService.deleteSession(sessionId, callback);
-        }
+        (async () => {
+            const session = spacesService.getSessionBySessionId(sessionId);
+            if (!force && !await checkSessionDelete(session)) {
+                callback(false);
+            } else {
+                spacesService.deleteSession(sessionId, callback);
+            }
+        })();
     }
 
     function handleAddLinkToNewSession(url, sessionName, callback) {

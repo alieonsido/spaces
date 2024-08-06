@@ -8,10 +8,8 @@
         "storage",
         "history",
         "unlimitedStorage",
-        "contextMenus"
-    ],
-    "--removed permissions--": [
-        "chrome://favicon/*"
+        "contextMenus",
+        "favicon"
     ],
     "background": {
         "service_worker": "js/background.js",

@@ -1,7 +1,6 @@
 /* global chrome  */
 // eslint-disable-next-line no-var, no-unused-vars
-globalThis.utils = {
-    getHashVariable: (key, urlStr) => {
+export function getHashVariable(key, urlStr) {
         const valuesByKey = {};
         const keyPairRegEx = /^(.+)=(.+)/;
 
@@ -25,4 +24,10 @@ globalThis.utils = {
         });
         return valuesByKey[key] || false;
     }
-};
+
+export function getFaviconURL(url, size = "16") {
+    const u = new URL(chrome.runtime.getURL("/_favicon/"));
+    u.searchParams.set("pageUrl", url);
+    u.searchParams.set("size", size);
+    return u.toString();
+}

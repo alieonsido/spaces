@@ -1,5 +1,7 @@
 /* global chrome, spacesRenderer  */
 
+// TODO is this dead code?  It's not loaded anywhere.
+
 (() => {
     function getSelectedSpace() {
         return document.querySelector('.space.selected');

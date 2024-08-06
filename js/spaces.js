@@ -1,5 +1,7 @@
 /* global chrome */
 
+import * as utils from './utils.js';
+
 (() => {
     const UNSAVED_SESSION = '<em>Unnamed window</em>';
     const nodes = {};
@@ -155,7 +157,7 @@
         if (tab.favIconUrl && tab.favIconUrl.indexOf('chrome://theme') < 0) {
             faviconSrc = tab.favIconUrl;
         } else {
-            faviconSrc = `chrome://favicon/${tab.url}`;
+            faviconSrc = utils.getFaviconURL(tab.url);
         }
         faviconEl.setAttribute('src', faviconSrc);
 
@@ -558,13 +560,22 @@
     function addEventListeners() {
         // register hashchange listener
         window.onhashchange = () => {
-            updateSpacesList();
             updateSpaceDetail();
+            // HACK original spaces code had a race condition b/w these two fns. updateSpaceDetail async modifies
+            // the selected space, which is rendered in bold by updateSpacesList.
+            setTimeout(updateSpacesList, 100);
         };
 
         // register incoming events listener
-        chrome.runtime.onMessage.addListener(request => {
-            if (request.action === 'updateSpaces' && request.spaces) {
+        chrome.runtime.onMessage.addListener((request, sender, respond) => {
+            if (request.action === 'uiAlert') {
+                alert(request.message);
+                respond(true);
+            }
+            if (request.action === 'uiConfirm') {
+                respond(window.confirm(request.message));
+            }
+            else if (request.action === 'updateSpaces' && request.spaces) {
                 handleAutoUpdateRequest(request.spaces);
             }
         });
@@ -630,8 +641,10 @@
         // if hash hasn't changed page will not trigger onhashchange event
         if (window.location.hash === hash) {
             if (forceRerender) {
-                updateSpacesList();
                 updateSpaceDetail();
+                // HACK original spaces code had a race condition b/w these two fns. updateSpaceDetail async modifies
+                // the selected space, which is rendered in bold by updateSpacesList.
+                setTimeout(updateSpacesList, 100);
             }
 
             // otherwise set new hash and let the change listener call routeHash

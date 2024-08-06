@@ -1,10 +1,10 @@
 /* global chrome spacesRenderer */
 
-let spaces;
-const spacesPromise = import('../build/comlink-extension.bundle.js').then(ComlinkExtension => {
-    const { createEndpoint, forward } = ComlinkExtension;
-    spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
-});
+import * as utils from './utils.js';
+import * as Comlink from '../node_modules/comlink/dist/esm/comlink.js';
+import { createEndpoint, forward } from '../build/comlink-extension.bundle.js';
+import { spacesRenderer } from './spacesRenderer.js';
+const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
 (() => {
     const UNSAVED_SESSION = '(unnamed window)';
@@ -22,7 +22,6 @@ const spacesPromise = import('../build/comlink-extension.bundle.js').then(Comlin
      */
 
     document.addEventListener('DOMContentLoaded', async () => {
-        await spacesPromise;
         const url = utils.getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
         const windowId = utils.getHashVariable(
@@ -350,7 +349,7 @@ const spacesPromise = import('../build/comlink-extension.bundle.js').then(Comlin
                         ) {
                             faviconSrc = tab.favIconUrl;
                         } else {
-                            faviconSrc = `chrome://favicon/${tab.url}`;
+                            faviconSrc = utils.getFaviconURL(tab.url);
                         }
                         nodes.activeTabFavicon.setAttribute('src', faviconSrc);
 
