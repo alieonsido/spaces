@@ -1,0 +1,3 @@
+[submodule "comlink-extension"]
+	path = comlink-extension
+	url = https://github.com/samdenty/comlink-extension

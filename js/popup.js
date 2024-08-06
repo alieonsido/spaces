@@ -1,5 +1,11 @@
 /* global chrome spacesRenderer */
 
+let spaces;
+const spacesPromise = import('../build/comlink-extension.bundle.js').then(ComlinkExtension => {
+    const { createEndpoint, forward } = ComlinkExtension;
+    spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
+});
+
 (() => {
     const UNSAVED_SESSION = '(unnamed window)';
     const NO_HOTKEY = 'no hotkey set';
@@ -16,7 +22,7 @@
      */
 
     document.addEventListener('DOMContentLoaded', async () => {
-        const { spaces } = chrome.extension.getBackgroundPage();
+        await spacesPromise;
         const url = utils.getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
         const windowId = utils.getHashVariable(
@@ -110,7 +116,6 @@
      */
 
     function renderMainCard() {
-        const { spaces } = chrome.extension.getBackgroundPage();
         spaces.requestHotkeys().then(hotkeys => {
             document.querySelector(
                 '#switcherLink .hotkey'

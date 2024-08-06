@@ -7,6 +7,14 @@
  */
 
 import {spacesService} from './spacesService.js';
+import * as Comlink from '../node_modules/comlink/dist/esm/comlink.mjs';
+import { createBackgroundEndpoint, isMessagePort } from '../build/comlink-extension.bundle.js';
+
+// TODO service worker doesn't have access to DOM's `screen` so we stub it here
+const screen = {
+    width: 500,
+    height: 500,
+}
 
 // eslint-disable-next-line no-unused-vars, no-var
 var spaces = (() => {
@@ -621,24 +629,24 @@ var spaces = (() => {
 
     async function requestHotkeys() {
         const commands = await chrome.commands.getAll();
-            let switchStr;
-            let moveStr;
-            let spacesStr;
+        let switchStr;
+        let moveStr;
+        let spacesStr;
 
-            commands.forEach(command => {
-                if (command.name === 'spaces-switch') {
-                    switchStr = command.shortcut;
-                } else if (command.name === 'spaces-move') {
-                    moveStr = command.shortcut;
-                } else if (command.name === 'spaces-open') {
-                    spacesStr = command.shortcut;
-                }
-            });
+        commands.forEach(command => {
+            if (command.name === 'spaces-switch') {
+                switchStr = command.shortcut;
+            } else if (command.name === 'spaces-move') {
+                moveStr = command.shortcut;
+            } else if (command.name === 'spaces-open') {
+                spacesStr = command.shortcut;
+            }
+        });
 
         return {
-                switchCode: switchStr,
-                moveCode: moveStr,
-                spacesCode: spacesStr,
+            switchCode: switchStr,
+            moveCode: moveStr,
+            spacesCode: spacesStr,
         };
     }
 
@@ -676,11 +684,11 @@ var spaces = (() => {
                 return false;
             }
             return {
-                        sessionId: false,
-                        windowId: window.id,
-                        name: false,
-                        tabs: window.tabs,
-                        history: false,
+                sessionId: false,
+                windowId: window.id,
+                name: false,
+                tabs: window.tabs,
+                history: false,
             };
         }
     }
@@ -1056,6 +1064,11 @@ var spaces = (() => {
         generatePopupParams,
     };
 })();
+
+chrome.runtime.onConnect.addListener((port) => {
+    if (isMessagePort(port)) return;
+    Comlink.expose(spaces, createBackgroundEndpoint(port));
+});
 
 spacesService.initialiseSpaces();
 spacesService.initialiseTabHistory();
