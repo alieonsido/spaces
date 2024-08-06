@@ -16,7 +16,7 @@
      */
 
     document.addEventListener('DOMContentLoaded', async () => {
-        const { utils, spaces } = chrome.extension.getBackgroundPage();
+        const { spaces } = chrome.extension.getBackgroundPage();
         const url = utils.getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
         const windowId = utils.getHashVariable(
@@ -100,7 +100,6 @@
     }
 
     function handleCloseAction() {
-        const { utils } = chrome.extension.getBackgroundPage();
         const opener = utils.getHashVariable('opener', window.location.href);
         if (opener && opener === 'bg') {
             chrome.runtime.sendMessage({
