@@ -266,7 +266,7 @@
         nodes.okButton = document.getElementById('moveBtn');
         nodes.cancelButton = document.getElementById('cancelBtn');
 
-        // nodes.home.setAttribute('href', chrome.extension.getURL('spaces.html'));
+        // nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
 
         nodes.moveForm.onsubmit = e => {
             e.preventDefault();

@@ -426,11 +426,11 @@ var spaces = (() => {
         let url;
 
         if (editMode && windowId) {
-            url = chrome.extension.getURL(
+            url = chrome.runtime.getURL(
                 `spaces.html#windowId=${windowId}&editMode=true`
             );
         } else {
-            url = chrome.extension.getURL('spaces.html');
+            url = chrome.runtime.getURL('spaces.html');
         }
 
         // if spaces open window already exists then just give it focus (should be up to date)
@@ -502,7 +502,7 @@ var spaces = (() => {
 
     function createOrShowSpacesPopupWindow(action, tabUrl) {
         generatePopupParams(action, tabUrl).then(params => {
-            const popupUrl = `${chrome.extension.getURL(
+            const popupUrl = `${chrome.runtime.getURL(
                 'popup.html'
             )}#opener=bg&${params}`;
             // if spaces  window already exists

@@ -751,7 +751,7 @@
         nodes.modalInput = document.getElementById('importTextArea');
         nodes.modalButton = document.getElementById('importBtn');
 
-        nodes.home.setAttribute('href', chrome.extension.getURL('spaces.html'));
+        nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
 
         // initialise event listeners for static elements
         addEventListeners();
