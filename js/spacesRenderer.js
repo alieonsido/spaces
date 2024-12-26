@@ -123,31 +123,32 @@ export const spacesRenderer = {
     },
 
     selectSpace: (selectedSpaceEl, updateText) => {
+        if (!selectedSpaceEl) return;
+        
         const allSpaceEls = document.querySelectorAll('#spacesList .space');
-
-        for (let i = 0; i < allSpaceEls.length; i += 1) {
-            const spaceEl = allSpaceEls[i];
+        
+        // 清除所有選擇狀態
+        allSpaceEls.forEach(spaceEl => {
             const windowId = spaceEl.getAttribute('data-windowId');
             const open = windowId && windowId !== 'false';
-            const selected = selectedSpaceEl === spaceEl;
-            spaceEl.className = 'space';
-            if (open) spaceEl.classList.add('open');
-            if (selected) spaceEl.classList.add('selected');
-        }
-
-        if (updateText) {
+            spaceEl.className = 'space' + (open ? ' open' : '');
+        });
+        
+        // 設置新的選擇狀態
+        selectedSpaceEl.classList.add('selected');
+        
+        // 更新輸入框
+        if (updateText && spacesRenderer.nodes.moveInput) {
             const spaceName = selectedSpaceEl.getAttribute('data-spaceName');
-            if (spaceName) {
-                spacesRenderer.nodes.moveInput.value = spaceName;
-            } else {
-                spacesRenderer.nodes.moveInput.value = '';
-                spacesRenderer.nodes.moveInput.placeholder = selectedSpaceEl.getAttribute(
-                    'data-placeholder'
-                );
+            spacesRenderer.nodes.moveInput.value = spaceName || '';
+            if (!spaceName) {
+                spacesRenderer.nodes.moveInput.placeholder = 
+                    selectedSpaceEl.getAttribute('data-placeholder');
             }
-
-            // spacesRenderer.nodes.moveInput.select();
         }
+        
+        // 確保選中的空間可見
+        selectedSpaceEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     },
 
     getDefaultSpaceTitle: space => {

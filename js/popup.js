@@ -208,26 +208,55 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
      * SWITCHER VIEW
      */
 
-    function renderSwitchCard() {
-        document.getElementById(
-            'popupContainer'
-        ).innerHTML = document.getElementById('switcherTemplate').innerHTML;
-        chrome.runtime.sendMessage({ action: 'requestAllSpaces' }, spaces => {
+    function renderSwitchCard() 
+    {
+        // 清空並準備容器
+        document.getElementById('popupContainer').innerHTML = 
+            document.getElementById('switcherTemplate').innerHTML;
+        
+        // 請求所有空間
+        chrome.runtime.sendMessage({ 
+            action: 'requestAllSpaces' 
+        }, spaces => {
+            if (!spaces || spaces.length === 0) return;
+            
             spacesRenderer.initialise(8, true);
             spacesRenderer.renderSpaces(spaces);
-
-            document.getElementById('spaceSelectForm').onsubmit = e => {
-                e.preventDefault();
-                handleSwitchAction(getSelectedSpace());
-            };
-
-            const allSpaceEls = document.querySelectorAll('.space');
-            Array.prototype.forEach.call(allSpaceEls, el => {
-                // eslint-disable-next-line no-param-reassign
-                el.onclick = () => {
-                    handleSwitchAction(el);
-                };
+            
+            // 加入鍵盤導航
+            document.addEventListener('keydown', (e) => {
+                switch(e.key) {
+                    case 'ArrowUp':
+                        spacesRenderer.handleSelectionNavigation('up');
+                        e.preventDefault();
+                        break;
+                    case 'ArrowDown':
+                        spacesRenderer.handleSelectionNavigation('down');
+                        e.preventDefault();
+                        break;
+                    case 'Enter':
+                        const selectedSpace = getSelectedSpace();
+                        if (selectedSpace) {
+                            handleSwitchAction(selectedSpace);
+                        }
+                        e.preventDefault();
+                        break;
+                    case 'Escape':
+                        window.close();
+                        break;
+                }
             });
+    
+            // 點擊切換處理
+            const allSpaceEls = document.querySelectorAll('.space');
+            Array.from(allSpaceEls).forEach(el => {
+                el.onclick = () => handleSwitchAction(el);
+            });
+            
+            // 自動選擇第一個空間
+            if (allSpaceEls.length > 0) {
+                spacesRenderer.selectSpace(allSpaceEls[0], true);
+            }
         });
     }
 
@@ -236,10 +265,12 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
     }
 
     function handleSwitchAction(selectedSpaceEl) {
+        const sessionId = selectedSpaceEl.getAttribute('data-sessionId');
+        const windowId = selectedSpaceEl.getAttribute('data-windowId');
+
         chrome.runtime.sendMessage({
-            action: 'switchToSpace',
-            sessionId: selectedSpaceEl.getAttribute('data-sessionId'),
-            windowId: selectedSpaceEl.getAttribute('data-windowId'),
+            action: 'loadSession',
+            sessionId: sessionId
         });
         window.close();
     }

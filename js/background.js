@@ -275,11 +275,25 @@ var spaces = (() => {
                 sessionId = _cleanParameter(request.sessionId);
 
                 if (windowId) {
-                    handleLoadWindow(windowId);
+                    // 檢查 window 是否存在
+                    chrome.windows.get(parseInt(windowId), { populate: true }, (window) => {
+                        if (chrome.runtime.lastError) {
+                            // Window 不存在，檢查是否有對應的 session
+                            const session = spacesService.getSessionByWindowId(windowId);
+                            if (session && session.id) {
+                                // 如果找到對應的 session，使用它來恢復
+                                handleLoadSession(session.id);
+                            } else if (sessionId) {
+                                // 如果有提供 sessionId，則使用它
+                                handleLoadSession(sessionId);
+                            }
+                        } else {
+                            handleLoadWindow(windowId);
+                        }
+                    });
                 } else if (sessionId) {
                     handleLoadSession(sessionId);
                 }
-
                 return false;
 
             case 'addLinkToNewSession':
@@ -389,14 +403,15 @@ var spaces = (() => {
 
     // add listeners for keyboard commands
 
-    chrome.commands.onCommand.addListener(command => {
-        // handle showing the move tab popup (tab.html)
+    chrome.commands.onCommand.addListener(async (command) => {
         if (command === 'spaces-move') {
             showSpacesMoveWindow();
-
-            // handle showing the switcher tab popup (switcher.html)
         } else if (command === 'spaces-switch') {
-            showSpacesSwitchWindow();
+            try {
+                await showSpacesSwitchWindow();
+            } catch (error) {
+                console.error('Failed to handle spaces-switch command:', error);
+            }
         }
     });
 
@@ -1092,6 +1107,98 @@ var spaces = (() => {
         spacesService.queueWindowEvent(windowId);
 
         callback(true);
+    }
+
+    function handleSwitchAction(selectedSpaceEl) {
+        const sessionId = selectedSpaceEl.getAttribute('data-sessionId');
+        const windowId = selectedSpaceEl.getAttribute('data-windowId');
+        
+        if (windowId) {
+            // 先檢查 window 是否存在
+            chrome.windows.get(parseInt(windowId), (window) => {
+                if (chrome.runtime.lastError) {
+                    // Window 不存在，嘗試使用 sessionId
+                    if (sessionId) {
+                        chrome.runtime.sendMessage({
+                            action: 'loadSession',
+                            sessionId: sessionId
+                        });
+                    }
+                } else {
+                    chrome.runtime.sendMessage({
+                        action: 'loadWindow',
+                        windowId: windowId
+                    });
+                }
+                window.close();
+            });
+        } else if (sessionId) {
+            chrome.runtime.sendMessage({
+                action: 'loadSession',
+                sessionId: sessionId
+            });
+            window.close();
+        }
+    }
+    
+    async function showSpacesSwitchWindow() {
+        try {
+            // 檢查是否已有開啟的 popup window
+            if (spacesPopupWindowId) {
+                try {
+                    await chrome.windows.get(spacesPopupWindowId);
+                    // 如果已存在，則關閉它
+                    await chrome.windows.remove(spacesPopupWindowId);
+                } catch (e) {
+                    // 如果 window 不存在，重置 ID
+                    spacesPopupWindowId = false;
+                }
+            }
+
+            // 創建新的 popup window
+            const popupWindow = await new Promise((resolve, reject) => {
+                chrome.windows.create({
+                    url: chrome.runtime.getURL('popup.html#action=switch'),
+                    type: 'popup',
+                    width: 400,
+                    height: 600,
+                    top: 0,
+                    left: screen.width - 400
+                }, (window) => {
+                    if (chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(window);
+                });
+            });
+
+            // 等待視窗完全載入
+            await new Promise((resolve) => {
+                chrome.tabs.query({windowId: popupWindow.id}, (tabs) => {
+                    if (tabs && tabs.length > 0) {
+                        const tab = tabs[0];
+                        if (tab.status === 'complete') {
+                            resolve();
+                        } else {
+                            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+                                if (tabId === tab.id && info.status === 'complete') {
+                                    chrome.tabs.onUpdated.removeListener(listener);
+                                    resolve();
+                                }
+                            });
+                        }
+                    }
+                });
+            });
+
+            spacesPopupWindowId = popupWindow.id;
+            return popupWindow;
+
+        } catch (error) {
+            console.error('Failed to show spaces switch window:', error);
+            throw error;
+        }
     }
 
     return {
