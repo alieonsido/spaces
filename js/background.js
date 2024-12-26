@@ -425,7 +425,17 @@ var spaces = (() => {
     });
 
     // runtime extension install listener
-    chrome.runtime.onInstalled.addListener(details => {
+    chrome.runtime.onInstalled.addListener(async (details) => {
+        // 移除所有現有的 context menu items
+        await chrome.contextMenus.removeAll();
+        
+        // 創建新的 context menu item
+        await chrome.contextMenus.create({
+            id: 'spaces-add-link',
+            title: 'Add link to space...',
+            contexts: ['link']
+        });
+
         if (details.reason === 'install') {
             // eslint-disable-next-line no-console
             console.log('This is a first install!');

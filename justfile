@@ -1,4 +1,3 @@
-set shell := ["pwsh.exe", "-NoLogo", "-NoProfile", "-c"]
 
 default: comlinkExtension
 

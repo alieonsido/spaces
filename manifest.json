@@ -32,7 +32,7 @@
         "48": "img/icon48.png",
         "128": "img/icon128.png"
     },
-    "--incognito--": "split",
+    "incognito": "split",
     "manifest_version": 3,
     "minimum_chrome_version": "35",
 
