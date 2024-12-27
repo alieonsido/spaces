@@ -6,6 +6,8 @@
  * Copyright (C) 2015 Dean Oemcke
  */
 
+// checking from manifestChecker branch
+
 import {spacesService} from './spacesService.js';
 import * as Comlink from '../node_modules/comlink/dist/esm/comlink.mjs';
 import { createBackgroundEndpoint, isMessagePort } from '../build/comlink-extension.bundle.js';
