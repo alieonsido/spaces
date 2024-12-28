@@ -555,6 +555,14 @@ import * as utils from './utils.js';
         );
     }
 
+    function requestCurrentSpace() {
+        return new Promise(resolve => {
+            chrome.windows.getLastFocused({ populate: true }, window => {
+                fetchSpaceDetail(false, window.id, resolve);
+            });
+        });
+    }
+
     // EVENT LISTENERS FOR STATIC DOM ELEMENTS
 
     function addEventListeners() {

@@ -47,6 +47,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
             renderCommon();
             routeView(action);
         });
+
     });
 
     function routeView(action) {
@@ -236,12 +237,27 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
     }
 
     function handleSwitchAction(selectedSpaceEl) {
+        if (!selectedSpaceEl) return;
+        
+        const sessionId = selectedSpaceEl.getAttribute('data-sessionId');
+        const windowId = selectedSpaceEl.getAttribute('data-windowId');
+        
+        console.log('Sending switch request:', {
+            sessionId: sessionId,
+            windowId: windowId
+        });
+
         chrome.runtime.sendMessage({
             action: 'switchToSpace',
-            sessionId: selectedSpaceEl.getAttribute('data-sessionId'),
-            windowId: selectedSpaceEl.getAttribute('data-windowId'),
+            sessionId: sessionId,
+            windowId: windowId
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.error('Switch failed:', chrome.runtime.lastError);
+                return;
+            }
+            window.close();
         });
-        window.close();
     }
 
     /*

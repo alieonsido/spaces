@@ -363,10 +363,6 @@ export var spacesService = {
         callback();
     },
     handleWindowFocussed: windowId => {
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
-            console.log(`handlingWindowFocussed event. windowId: ${windowId}`);
-
         if (windowId <= 0) {
             return;
         }
@@ -374,6 +370,17 @@ export var spacesService = {
         const session = spacesService.getSessionByWindowId(windowId);
         if (session) {
             session.lastAccess = new Date();
+            
+            // 重要: 立即更新 session 資料
+            if (session.id) {
+                spacesService.saveExistingSession(session.id);
+            }
+            
+            // 觸發 popup 更新
+            chrome.runtime.sendMessage({
+                action: 'updateSpaces',
+                spaces: spacesService.getAllSessions()
+            });
         }
     },
 

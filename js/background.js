@@ -275,13 +275,17 @@ var spaces = (() => {
             case 'switchToSpace':
                 windowId = _cleanParameter(request.windowId);
                 sessionId = _cleanParameter(request.sessionId);
+                
+                // console.log('switchToSpace called with:', {
+                //     windowId: windowId,
+                //     sessionId: sessionId
+                // });
 
                 if (windowId) {
                     handleLoadWindow(windowId);
                 } else if (sessionId) {
                     handleLoadSession(sessionId);
                 }
-
                 return false;
 
             case 'addLinkToNewSession':
