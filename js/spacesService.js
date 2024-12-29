@@ -16,6 +16,8 @@ export var spacesService = {
     eventQueueCount: 0,
     lastVersion: 0,
     debug: true,
+    queue: [],
+    isProcessing: false,
 
     noop: () => {},
 
@@ -369,18 +371,25 @@ export var spacesService = {
 
         const session = spacesService.getSessionByWindowId(windowId);
         if (session) {
-            session.lastAccess = new Date();
+            // 將更新操作封裝為一個函數並加入隊列
+            spacesService.queue.push(() => {
+                session.lastAccess = new Date();
             
-            // 重要: 立即更新 session 資料
-            if (session.id) {
-                spacesService.saveExistingSession(session.id);
-            }
-            
-            // 觸發 popup 更新
-            chrome.runtime.sendMessage({
-                action: 'updateSpaces',
-                spaces: spacesService.getAllSessions()
+                // 保存 session 並在完成後發送更新通知
+                spacesService.saveExistingSession(session.id, () => {
+                    chrome.runtime.sendMessage({
+                        action: 'updateSpaces',
+                        spaces: spacesService.getAllSessions()
+                    }, () => {
+                        // 任務完成，設置處理狀態為 false 並處理下一個任務
+                        spacesService.isProcessing = false;
+                        spacesService.processQueue();
+                    });
+                });
             });
+
+            // 開始處理隊列
+            spacesService.processQueue();
         }
     },
 
@@ -653,10 +662,10 @@ export var spacesService = {
     saveExistingSession: (sessionId, callback) => {
         const session = spacesService.getSessionBySessionId(sessionId);
 
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
+        // 如果沒有提供回調，使用 noop 函數
+        callback = typeof callback === 'function' ? callback : spacesService.noop;
 
+        // 更新 session 並調用回調
         dbService.updateSession(session, callback);
     },
 
@@ -718,5 +727,15 @@ export var spacesService = {
             });
             callback();
         });
+    },
+
+    processQueue: () => {
+        if (spacesService.isProcessing || spacesService.queue.length === 0) {
+            return;
+        }
+
+        spacesService.isProcessing = true;
+        const update = spacesService.queue.shift();
+        update();
     },
 };
