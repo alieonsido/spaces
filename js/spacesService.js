@@ -15,7 +15,7 @@ export var spacesService = {
     historyQueue: [],
     eventQueueCount: 0,
     lastVersion: 0,
-    debug: true,
+    debug: false,
     queue: [],
     isProcessing: false,
 
