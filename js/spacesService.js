@@ -15,7 +15,7 @@ export var spacesService = {
     historyQueue: [],
     eventQueueCount: 0,
     lastVersion: 0,
-    debug: false,
+    debug: true,
 
     noop: () => {},
 
@@ -209,12 +209,12 @@ export var spacesService = {
             console.dir(spacesService.sessions);
             // eslint-disable-next-line no-console
             console.dir(curWindow);
-            // eslint-disable-next-line no-alert
-            alert('couldnt match window. creating temporary session');
+            // eslint-disable-next-line no-console
+            console.log('Could not match window. Creating temporary session.');
         }
-
+    
         const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
-
+    
         spacesService.sessions.push({
             id: false,
             windowId: curWindow.id,
