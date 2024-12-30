@@ -222,11 +222,16 @@ export var spacesService = {
             // eslint-disable-next-line no-console
             console.log('Could not match window. Creating temporary session.');
         }
-    
+
+        // 先計算 sessionHash
+        const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
+        
+        // 檢查是否存在相同 windowId 的舊 session
         const existingSession = spacesService.sessions.find(s => s.windowId === curWindow.id);
         const existingName = existingSession ? existingSession.name : false;
-    
-        spacesService.sessions.push({
+
+        // 創建新的臨時 session
+        const newSession = {
             id: false,
             windowId: curWindow.id,
             sessionHash,
@@ -234,7 +239,21 @@ export var spacesService = {
             tabs: curWindow.tabs,
             history: [],
             lastAccess: new Date(),
-        });
+        };
+
+        // 將新 session 加入到 sessions 陣列
+        spacesService.sessions.push(newSession);
+
+        // 如果有名稱，立即保存到資料庫
+        if (existingName) {
+            spacesService.saveNewSession(existingName, curWindow.tabs, curWindow.id, () => {
+                // 更新 UI
+                chrome.runtime.sendMessage({
+                    action: 'updateSpaces',
+                    spaces: spacesService.getAllSessions()
+                });
+            });
+        }
     },
 
     // local storage getters/setters
@@ -380,25 +399,43 @@ export var spacesService = {
 
         const session = spacesService.getSessionByWindowId(windowId);
         if (session) {
-            // 將更新操作封裝為一個函數並加入隊列
-            spacesService.queue.push(() => {
-                session.lastAccess = new Date();
+            // 立即更新 lastAccess
+            session.lastAccess = new Date();
             
-                // 保存 session 並在完成後發送更新通知
-                spacesService.saveExistingSession(session.id, () => {
-                    chrome.runtime.sendMessage({
-                        action: 'updateSpaces',
-                        spaces: spacesService.getAllSessions()
-                    }, () => {
-                        // 任務完成，設置處理狀態為 false 並處理下一個任務
-                        spacesService.isProcessing = false;
-                        spacesService.processQueue();
+            // 將更新操作加入隊列
+            spacesService.queue.push(async () => {
+                try {
+                    // 等待保存完成
+                    await new Promise((resolve, reject) => {
+                        spacesService.saveExistingSession(session.id, (result) => {
+                            if (result === false) {
+                                reject(new Error('Failed to save session'));
+                            } else {
+                                resolve();
+                            }
+                        });
                     });
-                });
+
+                    // 發送更新消息
+                    await new Promise((resolve) => {
+                        chrome.runtime.sendMessage({
+                            action: 'updateSpaces',
+                            spaces: spacesService.getAllSessions()
+                        }, resolve);
+                    });
+                } catch (error) {
+                    console.error('Error updating session:', error);
+                } finally {
+                    // 無論成功與否，都要重置處理狀態
+                    spacesService.isProcessing = false;
+                    spacesService.processQueue();
+                }
             });
 
             // 開始處理隊列
-            spacesService.processQueue();
+            if (!spacesService.isProcessing) {
+                spacesService.processQueue();
+            }
         }
     },
 
@@ -770,6 +807,18 @@ export var spacesService = {
 
         spacesService.isProcessing = true;
         const update = spacesService.queue.shift();
-        update();
+        
+        // 使用 Promise 來處理非同步操作
+        Promise.resolve(update())
+            .catch(error => {
+                console.error('Error processing queue item:', error);
+            })
+            .finally(() => {
+                spacesService.isProcessing = false;
+                // 檢查是否還有其他任務需要處理
+                if (spacesService.queue.length > 0) {
+                    spacesService.processQueue();
+                }
+            });
     },
 };
