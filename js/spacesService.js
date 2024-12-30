@@ -671,44 +671,58 @@ export var spacesService = {
 
     saveNewSession: (sessionName, tabs, windowId, callback) => {
         if (!tabs) {
-            callback();
+            callback(false);
             return;
         }
 
-        const sessionHash = spacesService.generateSessionHash(tabs);
-        let session;
+        try {
+            const sessionHash = spacesService.generateSessionHash(tabs);
+            let session;
 
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
+            // 確保回調函數存在
+            callback = typeof callback === 'function' ? callback : spacesService.noop;
 
-        // check for a temporary session with this windowId
-        if (windowId) {
-            session = spacesService.getSessionByWindowId(windowId);
+            // 檢查窗口ID對應的臨時會話
+            if (windowId) {
+                session = spacesService.getSessionByWindowId(windowId);
+            }
+
+            // 如果沒有找到臨時會話，創建新的
+            if (!session) {
+                session = {
+                    windowId,
+                    history: [],
+                };
+                spacesService.sessions.push(session);
+            }
+
+            // 更新會話詳情
+            session.name = sessionName;
+            session.sessionHash = sessionHash;
+            session.tabs = tabs;
+            session.lastAccess = new Date();
+
+            // 保存到數據庫
+            dbService.createSession(session, savedSession => {
+                try {
+                    if (savedSession) {
+                        // 更新緩存中的會話ID
+                        session.id = savedSession.id;
+                        callback(savedSession);
+                    } else {
+                        console.warn('Failed to create session in database');
+                        callback(false);
+                    }
+                } catch (err) {
+                    console.error('Error in saveNewSession callback:', err);
+                    callback(false);
+                }
+            });
+
+        } catch (err) {
+            console.error('Error in saveNewSession:', err);
+            callback(false);
         }
-
-        // if no temporary session found with this windowId, then create one
-        if (!session) {
-            session = {
-                windowId,
-                history: [],
-            };
-            spacesService.sessions.push(session);
-        }
-
-        // update temporary session details
-        session.name = sessionName;
-        session.sessionHash = sessionHash;
-        session.tabs = tabs;
-        session.lastAccess = new Date();
-
-        // save session to db
-        dbService.createSession(session, savedSession => {
-            // update sessionId in cache
-            session.id = savedSession.id;
-
-            callback(savedSession);
-        });
     },
 
     deleteSession: (sessionId, callback) => {

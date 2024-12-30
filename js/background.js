@@ -867,25 +867,55 @@ var spaces = (() => {
     function handleSaveNewSession(windowId, sessionName, callback) {
         (async () => {
             try {
+                // 1. 獲取當前窗口信息
                 const curWindow = await chrome.windows.get(windowId, { populate: true });
+                
+                // 2. 檢查是否存在同名會話
                 const existingSession = spacesService.getSessionByName(sessionName);
 
                 if (existingSession) {
-                    const overwrite = await checkSessionOverwrite(existingSession);
+                    // 3. 使用 Promise 來處理確認對話框
+                    const overwrite = await new Promise(resolve => {
+                        chrome.runtime.sendMessage({
+                            action: 'uiConfirm',
+                            message: `Replace existing space: ${sessionName}?`
+                        }, response => {
+                            // 處理可能的連接錯誤
+                            if (chrome.runtime.lastError) {
+                                console.warn('Confirmation dialog failed:', chrome.runtime.lastError);
+                                resolve(false);
+                            } else {
+                                resolve(response);
+                            }
+                        });
+                    });
+
                     if (!overwrite) {
                         callback(false);
                         return;
                     }
-                    await handleDeleteSession(existingSession.id, true, noop);
+
+                    // 4. 刪除現有會話
+                    await new Promise(resolve => {
+                        handleDeleteSession(existingSession.id, true, resolve);
+                    });
                 }
-                const saveResult = await spacesService.saveNewSession(
-                    sessionName,
-                    curWindow.tabs,
-                    curWindow.id
-                );
+
+                // 5. 保存新會話
+                const saveResult = await new Promise(resolve => {
+                    spacesService.saveNewSession(
+                        sessionName,
+                        curWindow.tabs,
+                        curWindow.id,
+                        result => resolve(result)
+                    );
+                });
+
                 callback(saveResult);
+
             } catch (error) {
                 console.error('Error in handleSaveNewSession:', error);
+                // 確保即使發生錯誤也會調用回調
                 callback(false);
             }
         })();
