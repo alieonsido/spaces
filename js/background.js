@@ -48,21 +48,23 @@ var spaces = (() => {
             updateSpacesWindow('tabs.onMoved');
         });
     });
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         if (checkInternalSpacesWindows(tab.windowId, false)) return;
 
-        // 新增：確保不會在一般的 tab 更新時重置 session name
-        if (changeInfo.status === 'complete') {
-            const session = spacesService.getSessionByWindowId(tab.windowId);
-            if (session && session.name) {
-                // 保持現有的 session name
-                return;
+        try {
+            if (changeInfo.status === 'complete') {
+                const session = spacesService.getSessionByWindowId(tab.windowId);
+                if (session && session.name) {
+                    return;
+                }
             }
-        }
 
-        spacesService.handleTabUpdated(tab, changeInfo, () => {
-            updateSpacesWindow('tabs.onUpdated');
-        });
+            spacesService.handleTabUpdated(tab, changeInfo, () => {
+                updateSpacesWindow('tabs.onUpdated');
+            });
+        } catch (error) {
+            console.error('Error in tabs.onUpdated:', error);
+        }
     });
     chrome.windows.onRemoved.addListener(windowId => {
         if (checkInternalSpacesWindows(windowId, true)) return;
@@ -90,29 +92,25 @@ var spaces = (() => {
 
     // add listeners for tab and window focus changes
     // when a tab or window is changed, close the move tab popup if it is open
-    chrome.windows.onFocusChanged.addListener(windowId => {
-        // Prevent a click in the popup on Ubunto or ChroneOS from closing the
-        // popup prematurely.
-        if (
-            windowId === chrome.windows.WINDOW_ID_NONE ||
-            windowId === spacesPopupWindowId
-        ) {
+    chrome.windows.onFocusChanged.addListener(async (windowId) => {
+        if (windowId === chrome.windows.WINDOW_ID_NONE ||
+            windowId === spacesPopupWindowId) {
             return;
         }
 
-        // 新增：保護現有的 session name
-        const session = spacesService.getSessionByWindowId(windowId);
-        if (session && session.name) {
-            // 確保 session name 不會被重置
-            spacesService.updateSessionName(session.id, session.name, () => {});
-        }
+        try {
+            const session = spacesService.getSessionByWindowId(windowId);
+            if (session && session.name) {
+                await spacesService.updateSessionName(session.id, session.name);
+            }
 
-        if (!debug && spacesPopupWindowId) {
-            if (spacesPopupWindowId) {
+            if (!debug && spacesPopupWindowId) {
                 closePopupWindow();
             }
+            spacesService.handleWindowFocussed(windowId);
+        } catch (error) {
+            console.error('Error in windows.onFocusChanged:', error);
         }
-        spacesService.handleWindowFocussed(windowId);
     });
 
     // add listeners for message requests from other extension pages (spaces.html & tab.html)
@@ -791,83 +789,102 @@ var spaces = (() => {
         return 0;
     }
 
-    function handleLoadSession(sessionId, tabUrl) {
-        const session = spacesService.getSessionBySessionId(sessionId);
+    async function handleLoadSession(sessionId, tabUrl) {
+        try {
+            const session = spacesService.getSessionBySessionId(sessionId);
+            
+            // 確保 session 存在
+            if (!session) {
+                console.error('Session not found:', sessionId);
+                return;
+            }
 
-        // if space is already open, then give it focus
-        if (session.windowId) {
-            handleLoadWindow(session.windowId, tabUrl);
-        } else {
-            const urls = session.tabs.map(curTab => {
-                return curTab.url;
+            if (session.windowId) {
+                await handleLoadWindow(session.windowId, tabUrl);
+                return;
+            }
+
+            const urls = session.tabs.map(curTab => curTab.url);
+            // 確保至少有一個 URL
+            if (urls.length === 0) {
+                console.error('No URLs found in session:', sessionId);
+                return;
+            }
+
+            const newWindow = await chrome.windows.create({
+                url: urls,
+                // 使用 session 中的設定，如果有的話
+                height: session.height || DEFAULT_WINDOW_CONFIG.height,
+                width: session.width || DEFAULT_WINDOW_CONFIG.width,
+                top: session.top || 0,
+                left: session.left || 0,
             });
-            chrome.windows.create(
-                {
-                    url: urls,
-                    height: screen.height - 100,
-                    width: screen.width - 100,
-                    top: 0,
-                    left: 0,
-                },
-                newWindow => {
-                    // 強化：確保 session 與 window 的關聯被正確建立和保持
-                    spacesService.matchSessionToWindow(session, newWindow);
+
+            // 更新 session 的 windowId
+            await spacesService.updateSessionWindowId(session.id, newWindow.id);
+
+            // 處理 pinned tabs
+            for (const curSessionTab of session.tabs) {
+                if (curSessionTab.pinned) {
+                    const matchingTab = newWindow.tabs.find(curNewTab => 
+                        curNewTab.url === curSessionTab.url || 
+                        curNewTab.pendingUrl === curSessionTab.url
+                    );
                     
-                    // 新增：額外確認 session name 被正確設置
-                    spacesService.updateSessionName(session.id, session.name, () => {
-                        // 處理 pinned tabs
-                        session.tabs.forEach(curSessionTab => {
-                            if (curSessionTab.pinned) {
-                                let pinnedTabId = false;
-                                newWindow.tabs.some(curNewTab => {
-                                    if (curNewTab.url === curSessionTab.url ||
-                                        curNewTab.pendingUrl === curSessionTab.url) {
-                                        pinnedTabId = curNewTab.id;
-                                        return true;
-                                    }
-                                    return false;
-                                });
-                                if (pinnedTabId) {
-                                    chrome.tabs.update(pinnedTabId, { pinned: true });
-                                }
-                            }
-                        });
-
-                    // if tabUrl is defined, then focus this tab
-                    if (tabUrl) {
-                        focusOrLoadTabInWindow(newWindow, tabUrl);
+                    if (matchingTab) {
+                        await chrome.tabs.update(matchingTab.id, { pinned: true });
                     }
-
-                    /* session.tabs.forEach(function (curTab) {
-                    chrome.tabs.create({windowId: newWindow.id, url: curTab.url, pinned: curTab.pinned, active: false});
-                });
-
-                chrome.tabs.query({windowId: newWindow.id, index: 0}, function (tabs) {
-                    chrome.tabs.remove(tabs[0].id);
-                }); */
                 }
-            );
+            }
+
+            if (tabUrl) {
+                await focusOrLoadTabInWindow(newWindow, tabUrl);
+            }
+        } catch (error) {
+            console.error('Error in handleLoadSession:', error);
         }
     }
     function handleLoadWindow(windowId, tabUrl) {
-        // assume window is already open, give it focus
-        if (windowId) {
-            focusWindow(windowId);
+        // 確保 windowId 存在
+        if (!windowId) {
+            console.error('Window ID is undefined in handleLoadWindow');
+            return;
         }
+
+        // assume window is already open, give it focus
+        focusWindow(windowId);
 
         // if tabUrl is defined, then focus this tab
         if (tabUrl) {
             chrome.windows.get(windowId, { populate: true }, window => {
+                if (!window) {
+                    console.error('Window not found:', windowId);
+                    return;
+                }
                 focusOrLoadTabInWindow(window, tabUrl);
             });
         }
     }
 
     function focusWindow(windowId) {
+        // 確保 windowId 存在
+        if (!windowId) {
+            console.error('Window ID is undefined in focusWindow');
+            return;
+        }
         chrome.windows.update(windowId, { focused: true });
     }
 
     function focusOrLoadTabInWindow(window, tabUrl) {
+        // 確保 window 和 tabUrl 存在
+        if (!window) {
+            console.error('Window is undefined in focusOrLoadTabInWindow');
+            return;
+        }
+        if (!tabUrl) {
+            console.error('tabUrl is undefined in focusOrLoadTabInWindow');
+            return;
+        }
         const match = window.tabs.some(tab => {
             if (tab.url === tabUrl) {
                 chrome.tabs.update(tab.id, { active: true });
@@ -876,7 +893,7 @@ var spaces = (() => {
             return false;
         });
         if (!match) {
-            chrome.tabs.create({ url: tabUrl });
+            chrome.tabs.create({ windowId: window.id, url: tabUrl });
         }
     }
 
@@ -1247,6 +1264,15 @@ var spaces = (() => {
         spacesService.queueWindowEvent(windowId);
 
         callback(true);
+    }
+
+    async function updateSessionWindowId(sessionId, windowId) {
+        const session = spacesService.getSessionBySessionId(sessionId);
+        if (session) {
+            session.windowId = windowId;
+            // 假設你有一個函數可以更新 session
+            await spacesService.updateSession(session);
+        }
     }
 
     return {
