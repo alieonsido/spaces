@@ -51,6 +51,15 @@ var spaces = (() => {
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         if (checkInternalSpacesWindows(tab.windowId, false)) return;
 
+        // 新增：確保不會在一般的 tab 更新時重置 session name
+        if (changeInfo.status === 'complete') {
+            const session = spacesService.getSessionByWindowId(tab.windowId);
+            if (session && session.name) {
+                // 保持現有的 session name
+                return;
+            }
+        }
+
         spacesService.handleTabUpdated(tab, changeInfo, () => {
             updateSpacesWindow('tabs.onUpdated');
         });
@@ -89,6 +98,13 @@ var spaces = (() => {
             windowId === spacesPopupWindowId
         ) {
             return;
+        }
+
+        // 新增：保護現有的 session name
+        const session = spacesService.getSessionByWindowId(windowId);
+        if (session && session.name) {
+            // 確保 session name 不會被重置
+            spacesService.updateSessionName(session.id, session.name, () => {});
         }
 
         if (!debug && spacesPopupWindowId) {
@@ -781,8 +797,6 @@ var spaces = (() => {
         // if space is already open, then give it focus
         if (session.windowId) {
             handleLoadWindow(session.windowId, tabUrl);
-
-            // else load space in new window
         } else {
             const urls = session.tabs.map(curTab => {
                 return curTab.url;
@@ -796,30 +810,28 @@ var spaces = (() => {
                     left: 0,
                 },
                 newWindow => {
-                    // force match this new window to the session
+                    // 強化：確保 session 與 window 的關聯被正確建立和保持
                     spacesService.matchSessionToWindow(session, newWindow);
-
-                    // after window has loaded try to pin any previously pinned tabs
-                    session.tabs.forEach(curSessionTab => {
-                        if (curSessionTab.pinned) {
-                            let pinnedTabId = false;
-                            newWindow.tabs.some(curNewTab => {
-                                if (
-                                    curNewTab.url === curSessionTab.url ||
-                                    curNewTab.pendingUrl === curSessionTab.url
-                                ) {
-                                    pinnedTabId = curNewTab.id;
-                                    return true;
-                                }
-                                return false;
-                            });
-                            if (pinnedTabId) {
-                                chrome.tabs.update(pinnedTabId, {
-                                    pinned: true,
+                    
+                    // 新增：額外確認 session name 被正確設置
+                    spacesService.updateSessionName(session.id, session.name, () => {
+                        // 處理 pinned tabs
+                        session.tabs.forEach(curSessionTab => {
+                            if (curSessionTab.pinned) {
+                                let pinnedTabId = false;
+                                newWindow.tabs.some(curNewTab => {
+                                    if (curNewTab.url === curSessionTab.url ||
+                                        curNewTab.pendingUrl === curSessionTab.url) {
+                                        pinnedTabId = curNewTab.id;
+                                        return true;
+                                    }
+                                    return false;
                                 });
+                                if (pinnedTabId) {
+                                    chrome.tabs.update(pinnedTabId, { pinned: true });
+                                }
                             }
-                        }
-                    });
+                        });
 
                     // if tabUrl is defined, then focus this tab
                     if (tabUrl) {
