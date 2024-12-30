@@ -1027,20 +1027,83 @@ var spaces = (() => {
 
     function handleUpdateSessionName(sessionId, sessionName, callback) {
         (async () => {
-            // check to make sure session name doesn't already exist
-            const existingSession = spacesService.getSessionByName(sessionName);
+            try {
+                // Check for existing session with same name
+                const existingSession = spacesService.getSessionByName(sessionName);
 
-            // if session with same name already exist, then prompt to override the existing session
-            if (existingSession && existingSession.id !== sessionId) {
-                if (!await checkSessionOverwrite(existingSession)) {
-                    callback(false);
-                    return;
+                // If session exists and it's not the same session
+                if (existingSession && existingSession.id !== sessionId) {
+                    let overwrite = false;
+                    
+                    try {
+                        // Find spaces.html tabs that can handle the confirmation
+                        const spacesTabs = await chrome.tabs.query({
+                            url: chrome.runtime.getURL('spaces.html')
+                        });
 
-                    // if we choose to override, then delete the existing session
+                        if (spacesTabs.length > 0) {
+                            // Send confirmation to spaces.html tab
+                            overwrite = await new Promise((resolve) => {
+                                chrome.tabs.sendMessage(spacesTabs[0].id, {
+                                    action: 'uiConfirm',
+                                    message: `Replace existing space: ${sessionName}?`
+                                }, (response) => {
+                                    if (chrome.runtime.lastError) {
+                                        console.warn('Failed to show confirmation dialog:', chrome.runtime.lastError);
+                                        resolve(false);
+                                    } else {
+                                        resolve(response);
+                                    }
+                                });
+                            });
+                        } else {
+                            // Create temporary tab for confirmation
+                            const tab = await chrome.tabs.create({
+                                url: chrome.runtime.getURL('spaces.html'),
+                                active: true
+                            });
+
+                            // Wait for confirmation
+                            overwrite = await new Promise((resolve) => {
+                                const listener = (message, sender, sendResponse) => {
+                                    if (message.action === 'confirmationResult') {
+                                        chrome.runtime.onMessage.removeListener(listener);
+                                        chrome.tabs.remove(tab.id);
+                                        resolve(message.result);
+                                    }
+                                };
+                                chrome.runtime.onMessage.addListener(listener);
+                                
+                                setTimeout(() => {
+                                    chrome.tabs.sendMessage(tab.id, {
+                                        action: 'uiConfirm',
+                                        message: `Replace existing space: ${sessionName}?`
+                                    });
+                                }, 100);
+                            });
+                        }
+                    } catch (err) {
+                        console.warn('Failed to show confirmation dialog:', err);
+                        overwrite = false;
+                    }
+
+                    if (!overwrite) {
+                        callback(false);
+                        return;
+                    }
+
+                    // Delete existing session if overwriting
+                    handleDeleteSession(existingSession.id, true, () => {
+                        spacesService.updateSessionName(sessionId, sessionName, callback);
+                    });
+                } else {
+                    // No conflict, just update the name
+                    spacesService.updateSessionName(sessionId, sessionName, callback);
                 }
-                handleDeleteSession(existingSession.id, true, noop);
+            } catch (error) {
+                console.error('Error in handleUpdateSessionName:', error);
+                callback(false);
             }
-            spacesService.updateSessionName(sessionId, sessionName, callback);
         })();
     }
 

@@ -316,11 +316,26 @@ import * as utils from './utils.js';
         // otherwise call the save service
         if (sessionId) {
             performSessionUpdate(newName, sessionId, session => {
-                if (session) reroute(session.id, false, true);
+                if (session) {
+                    // 更新當前空間的名稱
+                    globalSelectedSpace.name = newName;
+                    updateNameForm(globalSelectedSpace);
+                    toggleNameEditMode(false);
+                    // 更新空間列表
+                    updateSpacesList();
+                }
             });
         } else if (windowId) {
             performNewSessionSave(newName, windowId, session => {
-                if (session) reroute(session.id, false, true);
+                if (session) {
+                    // 更新當前空間的資訊
+                    globalSelectedSpace.sessionId = session.id;
+                    globalSelectedSpace.name = newName;
+                    updateNameForm(globalSelectedSpace);
+                    toggleNameEditMode(false);
+                    // 更新空間列表
+                    updateSpacesList();
+                }
             });
         }
 
