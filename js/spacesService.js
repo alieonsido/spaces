@@ -189,19 +189,27 @@ export var spacesService = {
     },
 
     matchSessionToWindow: (session, curWindow) => {
-        // remove any other sessions tied to this windowId (temporary sessions)
-        for (let i = spacesService.sessions.length - 1; i >= 0; i -= 1) {
+        // 保存舊 session 的名稱
+        let oldSessionName = false;
+        
+        // 移除其他綁定到此 windowId 的 sessions
+        for (let i = spacesService.sessions.length - 1; i >= 0; i--) {
             if (spacesService.sessions[i].windowId === curWindow.id) {
                 if (spacesService.sessions[i].id) {
                     spacesService.sessions[i].windowId = false;
                 } else {
+                    oldSessionName = spacesService.sessions[i].name;
                     spacesService.sessions.splice(i, 1);
                 }
             }
         }
 
-        // assign windowId to newly matched session
-        // eslint-disable-next-line no-param-reassign
+        // 如果新 session 沒有名稱但有舊名稱，則保留舊名稱
+        if (!session.name && oldSessionName) {
+            session.name = oldSessionName;
+        }
+
+        // 分配 windowId 給新匹配的 session
         session.windowId = curWindow.id;
     },
 
@@ -215,13 +223,14 @@ export var spacesService = {
             console.log('Could not match window. Creating temporary session.');
         }
     
-        const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
+        const existingSession = spacesService.sessions.find(s => s.windowId === curWindow.id);
+        const existingName = existingSession ? existingSession.name : false;
     
         spacesService.sessions.push({
             id: false,
             windowId: curWindow.id,
             sessionHash,
-            name: false,
+            name: existingName, // 保留原有名稱
             tabs: curWindow.tabs,
             history: [],
             lastAccess: new Date(),
@@ -519,10 +528,21 @@ export var spacesService = {
             // check for sessionMatch
             if (!session || !session.id) {
                 if (spacesService.debug) {
-                    // eslint-disable-next-line no-console
                     console.log('session check triggered');
                 }
+                // 保存當前 session 名稱
+                const currentName = session ? session.name : false;
+                
+                // 檢查 session 匹配
                 spacesService.checkForSessionMatch(curWindow);
+                
+                // 如果有名稱，更新新建的臨時 session
+                if (currentName) {
+                    const newSession = spacesService.getSessionByWindowId(curWindow.id);
+                    if (newSession) {
+                        newSession.name = currentName;
+                    }
+                }
             }
             callback();
         });
