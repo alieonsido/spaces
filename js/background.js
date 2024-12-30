@@ -165,13 +165,9 @@ var spaces = (() => {
             case 'saveNewSession':
                 windowId = _cleanParameter(request.windowId);
                 if (windowId && request.sessionName) {
-                    handleSaveNewSession(
-                        windowId,
-                        request.sessionName,
-                        sendResponse
-                    );
-                }
-                return true; // allow async response
+                    handleSaveNewSession(windowId, request.sessionName, sendResponse);
+                } 
+                return true; // 保持消息通道開啟以便異步回應
 
             case 'importNewSession':
                 if (request.urlList) {
@@ -870,30 +866,35 @@ var spaces = (() => {
 
     function handleSaveNewSession(windowId, sessionName, callback) {
         (async () => {
-            const curWindow = await chrome.windows.get(windowId, { populate: true });
-            const existingSession = spacesService.getSessionByName(sessionName);
+            try {
+                const curWindow = await chrome.windows.get(windowId, { populate: true });
+                const existingSession = spacesService.getSessionByName(sessionName);
 
-            // if session with same name already exist, then prompt to override the existing session
-            if (existingSession) {
-                if (!await checkSessionOverwrite(existingSession)) {
-                    callback(false);
-                    return;
-
-                    // if we choose to overwrite, delete the existing session
+                if (existingSession) {
+                    const overwrite = await checkSessionOverwrite(existingSession);
+                    if (!overwrite) {
+                        callback(false);
+                        return;
+                    }
+                    await handleDeleteSession(existingSession.id, true, noop);
                 }
-                handleDeleteSession(existingSession.id, true, noop);
+                const saveResult = await spacesService.saveNewSession(
+                    sessionName,
+                    curWindow.tabs,
+                    curWindow.id
+                );
+                callback(saveResult);
+            } catch (error) {
+                console.error('Error in handleSaveNewSession:', error);
+                callback(false);
             }
-            spacesService.saveNewSession(
-                sessionName,
-                curWindow.tabs,
-                curWindow.id,
-                callback
-            );
         })();
     }
 
-    function handleRestoreFromBackup(_spaces, callback) {
-        (async () => {
+    function handleRestoreFromBackup(_spaces, callback) 
+    {
+        (async () => 
+        {
             let existingSession;
             let performSave;
 
@@ -930,7 +931,9 @@ var spaces = (() => {
                 }
             }
             Promise.all(promises).then(callback);
-        })();
+        }
+        )
+        ();
     }
 
     function handleImportNewSession(urlList, callback) {
