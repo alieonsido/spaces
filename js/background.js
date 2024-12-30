@@ -874,21 +874,38 @@ var spaces = (() => {
                 const existingSession = spacesService.getSessionByName(sessionName);
 
                 if (existingSession) {
-                    // 3. 使用 Promise 來處理確認對話框
-                    const overwrite = await new Promise(resolve => {
-                        chrome.runtime.sendMessage({
-                            action: 'uiConfirm',
-                            message: `Replace existing space: ${sessionName}?`
-                        }, response => {
-                            // 處理可能的連接錯誤
-                            if (chrome.runtime.lastError) {
-                                console.warn('Confirmation dialog failed:', chrome.runtime.lastError);
-                                resolve(false);
-                            } else {
-                                resolve(response);
-                            }
-                        });
+                    // 3. 查找所有 spaces.html 標籤頁
+                    const tabs = await chrome.tabs.query({
+                        url: chrome.runtime.getURL('spaces.html')
                     });
+
+                    let overwrite = false;
+                    
+                    if (tabs.length > 0) {
+                        // 如果找到 spaces.html 標籤頁，發送確認消息
+                        try {
+                            overwrite = await new Promise(resolve => {
+                                chrome.tabs.sendMessage(tabs[0].id, {
+                                    action: 'uiConfirm',
+                                    message: `Replace existing space: ${sessionName}?`
+                                }, response => {
+                                    if (chrome.runtime.lastError) {
+                                        console.warn('Confirmation dialog failed:', chrome.runtime.lastError);
+                                        resolve(false);
+                                    } else {
+                                        resolve(response);
+                                    }
+                                });
+                            });
+                        } catch (err) {
+                            console.warn('Failed to show confirmation dialog:', err);
+                            // 如果無法顯示確認對話框，默認不覆蓋
+                            overwrite = false;
+                        }
+                    } else {
+                        // 如果沒有找到 spaces.html，使用原生確認對話框
+                        overwrite = window.confirm(`Replace existing space: ${sessionName}?`);
+                    }
 
                     if (!overwrite) {
                         callback(false);
@@ -915,7 +932,6 @@ var spaces = (() => {
 
             } catch (error) {
                 console.error('Error in handleSaveNewSession:', error);
-                // 確保即使發生錯誤也會調用回調
                 callback(false);
             }
         })();

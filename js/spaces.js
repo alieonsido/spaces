@@ -575,13 +575,14 @@ import * as utils from './utils.js';
         };
 
         // register incoming events listener
-        chrome.runtime.onMessage.addListener((request, sender, respond) => {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (request.action === 'uiAlert') {
                 alert(request.message);
-                respond(true);
+                sendResponse(true);
             }
             if (request.action === 'uiConfirm') {
-                respond(window.confirm(request.message));
+                sendResponse(window.confirm(request.message));
+                return true;
             }
             else if (request.action === 'updateSpaces' && request.spaces) {
                 handleAutoUpdateRequest(request.spaces);
