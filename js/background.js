@@ -225,6 +225,10 @@ var spaces = (() => {
             case 'requestHotkeys':
                 requestHotkeys().then(r => {sendResponse(r)});
                 return true;
+            case 'uiConfirm':
+                const userConfirmed = confirm(request.message);
+                sendResponse(userConfirmed);
+                return true; //
 
             case 'requestTabDetail':
                 tabId = _cleanParameter(request.tabId);
@@ -867,44 +871,44 @@ var spaces = (() => {
     function handleSaveNewSession(windowId, sessionName, callback) {
         (async () => {
             try {
-                // 1. 獲取當前窗口信息
+                // 1. Get current window info
                 const curWindow = await chrome.windows.get(windowId, { populate: true });
                 
-                // 2. 檢查是否存在同名會話
+                // 2. Check for existing session
                 const existingSession = spacesService.getSessionByName(sessionName);
 
                 if (existingSession) {
-                    // 3. 查找所有 spaces.html 標籤頁
-                    const tabs = await chrome.tabs.query({
-                        url: chrome.runtime.getURL('spaces.html')
-                    });
-
                     let overwrite = false;
                     
-                    if (tabs.length > 0) {
-                        // 如果找到 spaces.html 標籤頁，發送確認消息
-                        try {
-                            overwrite = await new Promise(resolve => {
+                    try {
+                        // Use chrome.tabs.query to find active tabs that can receive messages
+                        const tabs = await chrome.tabs.query({
+                            active: true,
+                            currentWindow: true
+                        });
+
+                        if (tabs.length > 0) {
+                            // Send message to active tab
+                            overwrite = await new Promise((resolve) => {
                                 chrome.tabs.sendMessage(tabs[0].id, {
                                     action: 'uiConfirm',
                                     message: `Replace existing space: ${sessionName}?`
-                                }, response => {
+                                }, (response) => {
                                     if (chrome.runtime.lastError) {
-                                        console.warn('Confirmation dialog failed:', chrome.runtime.lastError);
-                                        resolve(false);
+                                        // Handle case where tab cannot receive messages
+                                        resolve(window.confirm(`Replace existing space: ${sessionName}?`));
                                     } else {
                                         resolve(response);
                                     }
                                 });
                             });
-                        } catch (err) {
-                            console.warn('Failed to show confirmation dialog:', err);
-                            // 如果無法顯示確認對話框，默認不覆蓋
-                            overwrite = false;
+                        } else {
+                            // Fallback if no active tabs found
+                            overwrite = window.confirm(`Replace existing space: ${sessionName}?`);
                         }
-                    } else {
-                        // 如果沒有找到 spaces.html，使用原生確認對話框
-                        overwrite = window.confirm(`Replace existing space: ${sessionName}?`);
+                    } catch (err) {
+                        console.warn('Failed to show confirmation dialog:', err);
+                        overwrite = false;
                     }
 
                     if (!overwrite) {
@@ -912,13 +916,13 @@ var spaces = (() => {
                         return;
                     }
 
-                    // 4. 刪除現有會話
+                    // Delete existing session if overwriting
                     await new Promise(resolve => {
                         handleDeleteSession(existingSession.id, true, resolve);
                     });
                 }
 
-                // 5. 保存新會話
+                // Save new session
                 const saveResult = await new Promise(resolve => {
                     spacesService.saveNewSession(
                         sessionName,
