@@ -881,30 +881,51 @@ var spaces = (() => {
                     let overwrite = false;
                     
                     try {
-                        // Use chrome.tabs.query to find active tabs that can receive messages
-                        const tabs = await chrome.tabs.query({
-                            active: true,
-                            currentWindow: true
+                        // Find spaces.html tabs that can handle the confirmation
+                        const spacesTabs = await chrome.tabs.query({
+                            url: chrome.runtime.getURL('spaces.html')
                         });
 
-                        if (tabs.length > 0) {
-                            // Send message to active tab
+                        if (spacesTabs.length > 0) {
+                            // Send confirmation to spaces.html tab
                             overwrite = await new Promise((resolve) => {
-                                chrome.tabs.sendMessage(tabs[0].id, {
+                                chrome.tabs.sendMessage(spacesTabs[0].id, {
                                     action: 'uiConfirm',
                                     message: `Replace existing space: ${sessionName}?`
                                 }, (response) => {
                                     if (chrome.runtime.lastError) {
-                                        // Handle case where tab cannot receive messages
-                                        resolve(window.confirm(`Replace existing space: ${sessionName}?`));
+                                        console.warn('Failed to show confirmation dialog:', chrome.runtime.lastError);
+                                        resolve(false);
                                     } else {
                                         resolve(response);
                                     }
                                 });
                             });
                         } else {
-                            // Fallback if no active tabs found
-                            overwrite = window.confirm(`Replace existing space: ${sessionName}?`);
+                            // If no spaces.html tab found, create one temporarily for the confirmation
+                            const tab = await chrome.tabs.create({
+                                url: chrome.runtime.getURL('spaces.html'),
+                                active: true
+                            });
+
+                            overwrite = await new Promise((resolve) => {
+                                const listener = (message, sender, sendResponse) => {
+                                    if (message.action === 'confirmationResult') {
+                                        chrome.runtime.onMessage.removeListener(listener);
+                                        chrome.tabs.remove(tab.id);
+                                        resolve(message.result);
+                                    }
+                                };
+                                chrome.runtime.onMessage.addListener(listener);
+                                
+                                // Send confirmation request after a short delay to ensure page is loaded
+                                setTimeout(() => {
+                                    chrome.tabs.sendMessage(tab.id, {
+                                        action: 'uiConfirm',
+                                        message: `Replace existing space: ${sessionName}?`
+                                    });
+                                }, 100);
+                            });
                         }
                     } catch (err) {
                         console.warn('Failed to show confirmation dialog:', err);
