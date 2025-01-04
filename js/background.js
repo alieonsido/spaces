@@ -97,13 +97,16 @@ var spaces = (() => {
             windowId === spacesPopupWindowId) {
             return;
         }
-
+    
         try {
+            // 修正：移除下列對 session.name 的覆蓋，以免將舊名寫回資料庫 (Bug #1)
+            /*
             const session = spacesService.getSessionByWindowId(windowId);
             if (session && session.name) {
                 await spacesService.updateSessionName(session.id, session.name);
             }
-
+            */
+    
             if (!debug && spacesPopupWindowId) {
                 closePopupWindow();
             }
@@ -112,7 +115,7 @@ var spaces = (() => {
             console.error('Error in windows.onFocusChanged:', error);
         }
     });
-
+    
     // add listeners for message requests from other extension pages (spaces.html & tab.html)
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -1290,3 +1293,4 @@ chrome.runtime.onConnect.addListener((port) => {
 
 spacesService.initialiseSpaces();
 spacesService.initialiseTabHistory();
+
