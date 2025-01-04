@@ -99,7 +99,7 @@ var spaces = (() => {
         }
     
         try {
-            // 修正：移除下列對 session.name 的覆蓋，以免將舊名寫回資料庫 (Bug #1)
+            // 修正：移除下列對 session.name 的覆蓋，以免舊名寫回資料庫 (Bug #1)
             /*
             const session = spacesService.getSessionByWindowId(windowId);
             if (session && session.name) {
