@@ -24,20 +24,26 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
     document.addEventListener('DOMContentLoaded', async () => {
         const url = utils.getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
-        const windowId = utils.getHashVariable(
-            'windowId',
-            window.location.href
-        );
+
+        // 先從 Hash 讀取 windowId
+        const windowId = utils.getHashVariable('windowId', window.location.href);
         globalWindowId = windowId !== '' ? windowId : false;
+
         globalTabId = utils.getHashVariable('tabId', window.location.href);
-        const sessionName = utils.getHashVariable(
-            'sessionName',
-            window.location.href
-        );
-        globalSessionName =
-            sessionName && sessionName !== 'false' ? sessionName : false;
+        const sessionName = utils.getHashVariable('sessionName', window.location.href);
+        globalSessionName = (sessionName && sessionName !== 'false') ? sessionName : false;
+
         const action = utils.getHashVariable('action', window.location.href);
 
+        // [修訂處] 若 Hash 未帶入 windowId，則試著抓當前 active window (同 Spaces-Switch 做法)
+        if (!globalWindowId) {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs && tabs.length > 0) {
+                globalWindowId = tabs[0].windowId;
+            }
+        }
+
+        // 根據有無 windowId 來決定要用 requestSpaceFromWindowId 還是 requestCurrentSpace
         const requestSpacePromise = globalWindowId
             ? spaces.requestSpaceFromWindowId(parseInt(globalWindowId, 10))
             : spaces.requestCurrentSpace();
@@ -47,7 +53,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
             renderCommon();
             routeView(action);
         });
-
     });
 
     function routeView(action) {
@@ -65,9 +70,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
      */
 
     function renderCommon() {
-        document.getElementById(
-            'activeSpaceTitle'
-        ).value = globalCurrentSpace.name
+        document.getElementById('activeSpaceTitle').value = globalCurrentSpace.name
             ? globalCurrentSpace.name
             : UNSAVED_SESSION;
 
@@ -117,12 +120,8 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
     function renderMainCard() {
         spaces.requestHotkeys().then(hotkeys => {
-            document.querySelector(
-                '#switcherLink .hotkey'
-            ).innerHTML = hotkeys.switchCode ? hotkeys.switchCode : NO_HOTKEY;
-            document.querySelector(
-                '#moverLink .hotkey'
-            ).innerHTML = hotkeys.moveCode ? hotkeys.moveCode : NO_HOTKEY;
+            document.querySelector('#switcherLink .hotkey').innerHTML = hotkeys.switchCode ? hotkeys.switchCode : NO_HOTKEY;
+            document.querySelector('#moverLink .hotkey').innerHTML = hotkeys.moveCode ? hotkeys.moveCode : NO_HOTKEY;
         });
 
         const hotkeyEls = document.querySelectorAll('.hotkey');
@@ -151,7 +150,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
                     window.location.hash = params;
                     window.location.reload();
                 });
-                // renderSwitchCard()
             });
         document
             .querySelector('#moverLink .optionText')
@@ -161,7 +159,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
                     window.location.hash = params;
                     window.location.reload();
                 });
-                // renderMoveCard()
             });
     }
 
@@ -210,9 +207,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
      */
 
     function renderSwitchCard() {
-        document.getElementById(
-            'popupContainer'
-        ).innerHTML = document.getElementById('switcherTemplate').innerHTML;
+        document.getElementById('popupContainer').innerHTML = document.getElementById('switcherTemplate').innerHTML;
         chrome.runtime.sendMessage({ action: 'requestAllSpaces' }, spaces => {
             spacesRenderer.initialise(8, true);
             spacesRenderer.renderSpaces(spaces);
@@ -224,7 +219,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
             const allSpaceEls = document.querySelectorAll('.space');
             Array.prototype.forEach.call(allSpaceEls, el => {
-                // eslint-disable-next-line no-param-reassign
                 el.onclick = () => {
                     handleSwitchAction(el);
                 };
@@ -238,10 +232,10 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
     function handleSwitchAction(selectedSpaceEl) {
         if (!selectedSpaceEl) return;
-        
+
         const sessionId = selectedSpaceEl.getAttribute('data-sessionId');
         const windowId = selectedSpaceEl.getAttribute('data-windowId');
-        
+
         console.log('Sending switch request:', {
             sessionId: sessionId,
             windowId: windowId
@@ -265,12 +259,8 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
      */
 
     function renderMoveCard() {
-        document.getElementById(
-            'popupContainer'
-        ).innerHTML = document.getElementById('moveTemplate').innerHTML;
+        document.getElementById('popupContainer').innerHTML = document.getElementById('moveTemplate').innerHTML;
 
-        // initialise global handles to key elements (singletons)
-        // nodes.home = document.getElementById('spacesHome');
         nodes.body = document.querySelector('body');
         nodes.spaceEditButton = document.getElementById('spaceEdit');
         nodes.moveForm = document.getElementById('spaceSelectForm');
@@ -280,8 +270,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
         nodes.activeTabFavicon = document.getElementById('activeTabFavicon');
         nodes.okButton = document.getElementById('moveBtn');
         nodes.cancelButton = document.getElementById('cancelBtn');
-
-        // nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
 
         nodes.moveForm.onsubmit = e => {
             e.preventDefault();
@@ -312,42 +300,30 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
             handleCloseAction();
         };
 
-        // update currentSpaceDiv
-        // nodes.windowTitle.innerHTML = "Current space: " + (globalSessionName ? globalSessionName : 'unnamed');
         nodes.activeSpaceTitle.innerHTML = globalSessionName || '(unnamed)';
-        // selectSpace(nodes.activeSpace);
-
         updateTabDetails();
 
-        chrome.runtime.sendMessage(
-            {
-                action: 'requestAllSpaces',
-            },
-            spaces => {
-                // remove currently visible space
-                const filteredSpaces = spaces.filter(space => {
-                    return `${space.windowId}` !== globalWindowId;
-                });
-                spacesRenderer.initialise(5, false);
-                spacesRenderer.renderSpaces(filteredSpaces);
+        chrome.runtime.sendMessage({ action: 'requestAllSpaces' }, spaces => {
+            const filteredSpaces = spaces.filter(space => {
+                return `${space.windowId}` !== globalWindowId;
+            });
+            spacesRenderer.initialise(5, false);
+            spacesRenderer.renderSpaces(filteredSpaces);
 
-                const allSpaceEls = document.querySelectorAll('.space');
-                Array.prototype.forEach.call(allSpaceEls, el => {
-                    // eslint-disable-next-line no-param-reassign
-                    const existingClickHandler = el.onclick;
-                    el.onclick = e => {
-                        existingClickHandler(e);
-                        handleSelectAction();
-                    };
-                });
-            }
-        );
+            const allSpaceEls = document.querySelectorAll('.space');
+            Array.prototype.forEach.call(allSpaceEls, el => {
+                const existingClickHandler = el.onclick;
+                el.onclick = e => {
+                    existingClickHandler(e);
+                    handleSelectAction();
+                };
+            });
+        });
     }
 
     function updateTabDetails() {
         let faviconSrc;
 
-        // if we are working with an open chrome tab
         if (globalTabId.length > 0) {
             chrome.runtime.sendMessage(
                 {
@@ -358,7 +334,6 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
                     if (tab) {
                         nodes.activeTabTitle.innerHTML = tab.title;
 
-                        // try to get best favicon url path
                         if (
                             tab.favIconUrl &&
                             tab.favIconUrl.indexOf('chrome://theme') < 0
@@ -369,25 +344,14 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
                         }
                         nodes.activeTabFavicon.setAttribute('src', faviconSrc);
 
-                        nodes.moveInput.setAttribute(
-                            'placeholder',
-                            'Move tab to..'
-                        );
-
-                        // nodes.windowTitle.innerHTML = tab.title;
-                        // nodes.windowFavicon.setAttribute('href', faviconSrc);
+                        nodes.moveInput.setAttribute('placeholder', 'Move tab to..');
                     }
                 }
             );
-
-            // else if we are dealing with a url only
         } else if (globalUrl) {
             const cleanUrl =
                 globalUrl.indexOf('://') > 0
-                    ? globalUrl.substr(
-                          globalUrl.indexOf('://') + 3,
-                          globalUrl.length
-                      )
+                    ? globalUrl.substr(globalUrl.indexOf('://') + 3, globalUrl.length)
                     : globalUrl;
             nodes.activeTabTitle.innerHTML = cleanUrl;
             nodes.activeTabFavicon.setAttribute('src', '/img/new.png');
@@ -398,8 +362,8 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
     function handleSelectAction() {
         const selectedSpaceEl = document.querySelector('.space.selected');
-        const sessionId = selectedSpaceEl.getAttribute('data-sessionId');
-        const windowId = selectedSpaceEl.getAttribute('data-windowId');
+        const sessionId = selectedSpaceEl && selectedSpaceEl.getAttribute('data-sessionId');
+        const windowId = selectedSpaceEl && selectedSpaceEl.getAttribute('data-windowId');
         const newSessionName = nodes.moveInput.value;
         const params = {};
 
@@ -436,8 +400,8 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
         }
 
         chrome.runtime.sendMessage(params);
-        // this window will be closed by background script
     }
+
     function handleEditSpace() {
         chrome.runtime.sendMessage({
             action: 'requestShowSpaces',
