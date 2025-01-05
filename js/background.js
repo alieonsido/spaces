@@ -9,7 +9,7 @@
 // checking from manifestChecker branch
 
 import {spacesService} from './spacesService.js';
-import * as Comlink from '../node_modules/comlink/dist/esm/comlink.mjs';
+import * as Comlink from '../comlink-extension/node_modules/comlink/dist/esm/comlink.mjs';
 import { createBackgroundEndpoint, isMessagePort } from '../build/comlink-extension.bundle.js';
 
 // TODO service worker doesn't have access to DOM's `screen` so we stub it here

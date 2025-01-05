@@ -1,7 +1,7 @@
 /* global chrome spacesRenderer */
 
 import * as utils from './utils.js';
-import * as Comlink from '../node_modules/comlink/dist/esm/comlink.js';
+import * as Comlink from '../comlink-extension/node_modules/comlink/dist/esm/comlink.js';
 import { createEndpoint, forward } from '../build/comlink-extension.bundle.js';
 import { spacesRenderer } from './spacesRenderer.js';
 const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
