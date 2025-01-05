@@ -295,7 +295,6 @@ export var spacesService = {
                 spacesService.noop
             );
 
-            // if this is a legitimate single tab removal from a window then update session/window
         } else {
             spacesService.historyQueue.push({
                 url: spacesService.tabHistoryUrlMap[tabId],
@@ -378,7 +377,7 @@ export var spacesService = {
             if (session.id) {
                 session.windowId = false;
 
-                // else if it is temporary session then remove the session from the cache
+            // else if it is temporary session then remove the session from the cache
             } else {
                 spacesService.sessions.some((curSession, index) => {
                     if (curSession.windowId === windowId) {
@@ -392,50 +391,83 @@ export var spacesService = {
 
         callback();
     },
+
+    /**
+     * [修訂] 在 Focus 時只更新 lastAccess，不覆寫使用者自訂的 session.name
+     * 並先檢查 DB 內該 session 是否仍存在，以避免「Failed to save session」。
+     */
     handleWindowFocussed: windowId => {
         if (windowId <= 0) {
             return;
         }
 
         const session = spacesService.getSessionByWindowId(windowId);
-        if (session) {
-            // 立即更新 lastAccess
-            session.lastAccess = new Date();
-            
-            // 將更新操作加入隊列
-            spacesService.queue.push(async () => {
-                try {
-                    // 等待保存完成
-                    await new Promise((resolve, reject) => {
-                        spacesService.saveExistingSession(session.id, (result) => {
-                            if (result === false) {
-                                reject(new Error('Failed to save session'));
-                            } else {
-                                resolve();
-                            }
-                        });
-                    });
+        if (!session) {
+            return;
+        }
 
-                    // 發送更新消息
-                    await new Promise((resolve) => {
-                        chrome.runtime.sendMessage({
-                            action: 'updateSpaces',
-                            spaces: spacesService.getAllSessions()
-                        }, resolve);
-                    });
-                } catch (error) {
-                    console.error('Error updating session:', error);
-                } finally {
-                    // 無論成功與否，都要重置處理狀態
-                    spacesService.isProcessing = false;
-                    spacesService.processQueue();
+        // 先從 DB 內檢查 session.id 是否確實存在
+        if (!session.id) {
+            // 可能是臨時的
+            if (spacesService.debug) {
+                console.warn('[spacesService] handleWindowFocussed: session has no id (temporary), skip DB update');
+            }
+            return;
+        }
+
+        // queue 內新增一個非同步任務
+        spacesService.queue.push(async () => {
+            try {
+                // 先 fetch DB 中的 session，確保不覆寫 session.name
+                const dbSession = await new Promise(resolve => {
+                    dbService.fetchSessionById(session.id, found => resolve(found));
+                });
+
+                if (!dbSession) {
+                    console.warn('[spacesService] handleWindowFocussed: session not found in DB, skip');
+                    return;
                 }
-            });
 
-            // 開始處理隊列
-            if (!spacesService.isProcessing) {
+                // 保留 DB 中的 session.name
+                session.name = dbSession.name || session.name;
+
+                // 僅更新 lastAccess
+                session.lastAccess = new Date();
+
+                // 其餘欄位 (tabs/history) 不在此動，以免 race condition
+                // 可選擇同步 windowId
+                session.windowId = windowId;
+
+                // 寫回 DB
+                await new Promise((resolve, reject) => {
+                    spacesService.saveExistingSession(session.id, result => {
+                        if (result === false) {
+                            reject(new Error('Failed to save session'));
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+
+                // 發送更新消息
+                await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({
+                        action: 'updateSpaces',
+                        spaces: spacesService.getAllSessions()
+                    }, resolve);
+                });
+                
+            } catch (error) {
+                console.error('Error updating session:', error);
+            } finally {
+                spacesService.isProcessing = false;
                 spacesService.processQueue();
             }
+        });
+
+        // 若目前沒有在處理 queue，就觸發 processQueue
+        if (!spacesService.isProcessing) {
+            spacesService.processQueue();
         }
     },
 
@@ -716,6 +748,10 @@ export var spacesService = {
         spacesService.saveExistingSession(session.id, callback);
     },
 
+    /**
+     * 這裡是原本的 saveExistingSession，接受 sessionId，
+     * 內部用 dbService.updateSession( session, callback )。
+     */
     saveExistingSession: (sessionId, callback) => {
         const session = spacesService.getSessionBySessionId(sessionId);
 
