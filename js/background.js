@@ -677,8 +677,8 @@ var spaces = (() => {
 
             const newWindow = await chrome.windows.create({
                 url: urls,
-                height: session.height || DEFAULT_WINDOW_CONFIG.height,
-                width: session.width || DEFAULT_WINDOW_CONFIG.width,
+                height: session.height,
+                width: session.width,
                 top: session.top || 0,
                 left: session.left || 0,
             });
