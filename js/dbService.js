@@ -133,6 +133,7 @@ export var dbService = {
                 return s.add(dbService.DB_SESSIONS, _session);
             })
             .then(result => {
+                console.log('dbService createSession stored =>', JSON.stringify(_session.tabs, null, 2));
                 if (result.length > 0) {
                     _callback(result[0]);
                 }

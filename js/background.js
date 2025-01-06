@@ -89,16 +89,11 @@ var spaces = (() => {
 
         try {
             const session = spacesService.getSessionByWindowId(windowId);
-
-            // [修訂處] 只做 handleWindowFocussed 或更新其他屬性，避免覆寫 session.name
-            // if (session && session.name) {
-            //     await spacesService.updateSessionName(session.id, session.name);
-            // }
+            // [修訂處] 只做 handleWindowFocussed 或其他屬性更新，避免覆寫 session.name
 
             if (!debug && spacesPopupWindowId) {
                 closePopupWindow();
             }
-            // 即便如此，依然會更新最後使用時間或其他必要資訊
             spacesService.handleWindowFocussed(windowId);
         } catch (error) {
             console.error('Error in windows.onFocusChanged:', error);
@@ -115,7 +110,7 @@ var spaces = (() => {
         let windowId;
         let tabId;
 
-        if(request.screen) {
+        if (request.screen) {
             screen.width = request.screen.width;
             screen.height = request.screen.height;
         }
@@ -212,8 +207,10 @@ var spaces = (() => {
                 return true;
 
             case 'uiConfirm':
-                const userConfirmed = confirm(request.message);
-                sendResponse(userConfirmed);
+                {
+                    const userConfirmed = confirm(request.message);
+                    sendResponse(userConfirmed);
+                }
                 return true;
 
             case 'requestTabDetail':
@@ -656,6 +653,27 @@ var spaces = (() => {
         return 0;
     }
 
+    async function waitForTabsComplete(windowId, maxAttempts = 10) {
+        let attempt = 0;
+        while (attempt < maxAttempts) {
+            try {
+                const w = await chrome.windows.get(windowId, { populate: true });
+                const incompleteTab = w.tabs.find(t => t.status !== 'complete');
+                // 如果全部載入完 (找不到不是 complete 的 tab)，就回傳
+                if (!incompleteTab) {
+                    return w;
+                }
+            } catch (err) {
+                console.warn('waitForTabsComplete error:', err);
+            }
+            attempt += 1;
+            // 等候 1 秒再試
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        // 即使超過次數也回傳
+        return chrome.windows.get(windowId, { populate: true });
+    }
+
     async function handleLoadSession(sessionId, tabUrl) {
         try {
             const session = spacesService.getSessionBySessionId(sessionId);
@@ -704,6 +722,7 @@ var spaces = (() => {
             console.error('Error in handleLoadSession:', error);
         }
     }
+
     function handleLoadWindow(windowId, tabUrl) {
         if (!windowId) {
             console.error('Window ID is undefined in handleLoadWindow');
@@ -760,7 +779,6 @@ var spaces = (() => {
 
                 if (existingSession) {
                     let overwrite = false;
-                    
                     try {
                         const spacesTabs = await chrome.tabs.query({
                             url: chrome.runtime.getURL('spaces.html')
@@ -795,7 +813,7 @@ var spaces = (() => {
                                     }
                                 };
                                 chrome.runtime.onMessage.addListener(listener);
-                                
+
                                 setTimeout(() => {
                                     chrome.tabs.sendMessage(tab.id, {
                                         action: 'uiConfirm',
@@ -829,7 +847,6 @@ var spaces = (() => {
                 });
 
                 callback(saveResult);
-
             } catch (error) {
                 console.error('Error in handleSaveNewSession:', error);
                 callback(false);
@@ -899,7 +916,7 @@ var spaces = (() => {
 
                 if (existingSession && existingSession.id !== sessionId) {
                     let overwrite = false;
-                    
+
                     try {
                         const spacesTabs = await chrome.tabs.query({
                             url: chrome.runtime.getURL('spaces.html')
@@ -934,7 +951,7 @@ var spaces = (() => {
                                     }
                                 };
                                 chrome.runtime.onMessage.addListener(listener);
-                                
+
                                 setTimeout(() => {
                                     chrome.tabs.sendMessage(tab.id, {
                                         action: 'uiConfirm',
@@ -1061,13 +1078,14 @@ var spaces = (() => {
         callback(true);
     }
 
-    async function updateSessionWindowId(sessionId, windowId) {
-        const session = spacesService.getSessionBySessionId(sessionId);
-        if (session) {
-            session.windowId = windowId;
-            await spacesService.updateSession(session);
-        }
-    }
+    // ★★ 已移除, move to spacesService.js ★★
+    // async function updateSessionWindowId(sessionId, windowId) {
+    //     const session = spacesService.getSessionBySessionId(sessionId);
+    //     if (session) {
+    //         session.windowId = windowId;
+    //         await spacesService.updateSession(session);
+    //     }
+    // }
 
     return {
         requestSpaceFromWindowId,
@@ -1084,4 +1102,3 @@ chrome.runtime.onConnect.addListener((port) => {
 
 spacesService.initialiseSpaces();
 spacesService.initialiseTabHistory();
-

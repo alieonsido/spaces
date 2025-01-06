@@ -580,8 +580,15 @@ export var spacesService = {
                     spacesService.historyQueue.splice(i, 1);
                 }
 
-                // override session tabs with tabs from window
-                session.tabs = curWindow.tabs;
+                // ---------------------------------------------------------
+                // ★★ 確保 session.tabs 存有 pinned 屬性 ★★
+                // ---------------------------------------------------------
+                session.tabs = curWindow.tabs.map(t => ({
+                    // 保留所有必要的屬性
+                    ...t,
+                    pinned: t.pinned
+                }));
+
                 session.sessionHash = spacesService.generateSessionHash(
                     session.tabs
                 );
@@ -737,6 +744,21 @@ export var spacesService = {
         spacesService.saveExistingSession(session.id, callback);
     },
 
+    /**
+     * 更新指定會話的窗口 ID
+     * @param {number} sessionId - 會話的 ID
+     * @param {number} windowId - 新窗口的 ID
+     */
+    updateSessionWindowId: async (sessionId, windowId) => {
+        const session = spacesService.getSessionBySessionId(sessionId);
+        if (session) {
+            session.windowId = windowId;
+            await dbService.updateSession(session);
+        } else {
+            console.error(`Session with ID ${sessionId} not found.`);
+        }
+    },
+
     updateSessionName: (sessionId, sessionName, callback) => {
         // eslint-disable-next-line no-param-reassign
         callback =
@@ -802,6 +824,7 @@ export var spacesService = {
                         // 更新緩存中的會話ID
                         session.id = savedSession.id;
                         callback(savedSession);
+                        console.log('saveNewSession about to store tabs =>', JSON.stringify(tabs, null, 2));
                     } else {
                         console.warn('Failed to create session in database');
                         callback(false);
