@@ -30,11 +30,11 @@ Please note that the webstore version may be behind the latest version here. -->
 
 1. Download the latest available version
 - Notice: At root directory, you could run `just` or `just comlink-extension` to build new submodule from `justfile` if you need to.
-1. Unarchive to your preferred location (e.g., `Downloads`).
-2. In **Google Chrome**, navigate to [chrome://extensions/](chrome://extensions/) and enable <kbd>Developer mode</kbd> in the upper right corner.
-3. Click on the <kbd>LOAD UNPACKED</kbd> button.
+2. Unarchive to your preferred location (e.g., `Downloads`).
+3. In **Google Chrome**, navigate to [chrome://extensions/](chrome://extensions/) and enable <kbd>Developer mode</kbd> in the upper right corner.
+4. Click on the <kbd>LOAD UNPACKED</kbd> button.
 - if you want to sync in every chrome browser between every device, you could use <kbd>PACK EXTENSION</kbd> button and then drag the `crx` file which you packed to the chrome extension page. More details could be found in [chrome extension documentation](https://developer.chrome.com/docs/extensions/mv3/getstarted/development-basics/#load-unpacked).
-1. Browse to the _root directory_ of the unarchived download, and click <kbd>OPEN</kbd>.
+5. Browse to the _root directory_ of the unarchived download, and click <kbd>OPEN</kbd>.
 
 > **TODO** &mdash; add more sections
 > - [ ] Build from github
