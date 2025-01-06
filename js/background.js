@@ -88,9 +88,6 @@ var spaces = (() => {
         }
 
         try {
-            const session = spacesService.getSessionByWindowId(windowId);
-            // [修訂處] 只做 handleWindowFocussed 或其他屬性更新，避免覆寫 session.name
-
             if (!debug && spacesPopupWindowId) {
                 closePopupWindow();
             }
