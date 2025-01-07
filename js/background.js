@@ -351,22 +351,8 @@ var spaces = (() => {
         }
     });
 
-    // add context menu entry
-    (async () => {
-        try {
-            await chrome.contextMenus.create({
-                id: 'spaces-add-link',
-                title: 'Add link to space...',
-                contexts: ['link'],
-            });
-        } catch (e) {
-            await chrome.contextMenus.update({
-                id: 'spaces-add-link',
-                title: 'Add link to space...',
-                contexts: ['link'],
-            });
-        }
-    })();
+    // ★★ [已移除原 IIFE 自動建立 contextMenu 的段落] ★★
+
     chrome.contextMenus.onClicked.addListener(info => {
         if (info.menuItemId === 'spaces-add-link') {
             showSpacesMoveWindow(info.linkUrl);
