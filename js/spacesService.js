@@ -396,76 +396,73 @@ export var spacesService = {
      * [修訂] 在 Focus 時只更新 lastAccess，不覆寫使用者自訂的 session.name
      * 並先檢查 DB 內該 session 是否仍存在，以避免「Failed to save session」。
      */
-    handleWindowFocussed: windowId => {
-        if (windowId <= 0) {
-            return;
-        }
+    handleWindowFocussed: (windowId) => {
+        if (windowId <= 0) return;
 
         const session = spacesService.getSessionByWindowId(windowId);
-        if (!session) {
-            return;
-        }
+        if (!session) return;
 
-        // 先從 DB 內檢查 session.id 是否確實存在
+        // 若 session.id 不存在，表示是暫存(unnamed) session，不進行 DB 更新
         if (!session.id) {
-            // 可能是臨時的
             if (spacesService.debug) {
-                console.warn('[spacesService] handleWindowFocussed: session has no id (temporary), skip DB update');
+                console.warn('[spacesService] handleWindowFocussed: temporary session, skip DB update');
             }
             return;
         }
 
-        // queue 內新增一個非同步任務
+        // 將更新任務 push 進 queue，避免 race condition
         spacesService.queue.push(async () => {
             try {
-                // 先 fetch DB 中的 session，確保不覆寫 session.name
+                // 先從 DB 拉出最新的 session (若找不到，則略過處理)
                 const dbSession = await new Promise(resolve => {
                     dbService.fetchSessionById(session.id, found => resolve(found));
                 });
-
                 if (!dbSession) {
                     console.warn('[spacesService] handleWindowFocussed: session not found in DB, skip');
                     return;
                 }
 
-                // 保留 DB 中的 session.name
-                session.name = dbSession.name || session.name;
+                // 若本地 session.name 不為空，而且與 dbSession.name 不同，以「本地為準」覆蓋 DB
+                // 避免意外覆蓋使用者剛剛改好的名稱
+                if (session.name && session.name.trim() !== '' && session.name !== dbSession.name) {
+                    dbSession.name = session.name;
+                } else {
+                    // 若本地沒有特別命名，則反向套用 DB 裏的名稱
+                    session.name = dbSession.name;
+                }
 
-                // 僅更新 lastAccess
+                // 僅更新 lastAccess 和 windowId，其它屬性不要動，以免 race condition
                 session.lastAccess = new Date();
-
-                // 其餘欄位 (tabs/history) 不在此動，以免 race condition
-                // 可選擇同步 windowId
                 session.windowId = windowId;
 
                 // 寫回 DB
                 await new Promise((resolve, reject) => {
-                    spacesService.saveExistingSession(session.id, result => {
-                        if (result === false) {
-                            reject(new Error('Failed to save session'));
+                    dbService.updateSession(session, updated => {
+                        if (!updated) {
+                            reject(new Error('[spacesService] Failed to save session on focus.'));
                         } else {
                             resolve();
                         }
                     });
                 });
 
-                // 發送更新消息
-                await new Promise((resolve) => {
+                // 發送更新訊息給 UI
+                await new Promise(resolve => {
                     chrome.runtime.sendMessage({
                         action: 'updateSpaces',
                         spaces: spacesService.getAllSessions()
-                    }, resolve);
+                    }, () => resolve());
                 });
-                
+
             } catch (error) {
-                console.error('Error updating session:', error);
+                console.error('Error in handleWindowFocussed:', error);
             } finally {
                 spacesService.isProcessing = false;
                 spacesService.processQueue();
             }
         });
 
-        // 若目前沒有在處理 queue，就觸發 processQueue
+        // 若目前沒在處理 queue，啟動 processQueue()
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
@@ -487,48 +484,36 @@ export var spacesService = {
 
     // careful here as this function gets called A LOT
     handleWindowEvent: (windowId, eventId, callback) => {
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
-
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
+        callback = typeof callback !== 'function' ? spacesService.noop : callback;
+        if (spacesService.debug) {
             console.log('------------------------------------------------');
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
-            console.log(
-                `event: ${eventId}. attempting session update. windowId: ${windowId}`
-            );
-
-        // sanity check windowId
+            console.log(`event: ${eventId}. attempting session update. windowId: ${windowId}`);
+        }
         if (!windowId || windowId <= 0) {
-            if (spacesService.debug)
-                // eslint-disable-next-line no-console
-                console.log(
-                    `received an event for windowId: ${windowId} which is obviously wrong`
-                );
+            if (spacesService.debug) {
+                console.log(`received an event for invalid windowId: ${windowId}`);
+            }
             return;
         }
 
-        chrome.windows.get(windowId, { populate: true }, curWindow => {
+        chrome.windows.get(windowId, { populate: true }, (curWindow) => {
+            // 若無法 get 到該 window，代表已關閉或無效
             if (chrome.runtime.lastError) {
-                // eslint-disable-next-line no-console
-                console.log(
-                    `${chrome.runtime.lastError.message}. perhaps its the development console???`
-                );
+                console.warn(`[handleWindowEvent] ${chrome.runtime.lastError.message}. Skip event.`);
+                // 若找不到該 window，就把對應 session 的 windowId 移除，防止「幽靈」狀態
+                spacesService.handleWindowRemoved(windowId, false, spacesService.noop);
+                return;
+            }
+            if (!curWindow) return;
 
-                // if we can't find this window, then better remove references to it from the cached sessions
-                // don't mark as a removed window however, so that the space can be resynced up if the window
-                // does actually still exist (for some unknown reason)
-                spacesService.handleWindowRemoved(
-                    windowId,
-                    false,
-                    spacesService.noop
-                );
+            if (spacesService.filterInternalWindows(curWindow)) {
                 return;
             }
 
-            if (!curWindow || spacesService.filterInternalWindows(curWindow)) {
+            if (spacesService.closedWindowIds[windowId]) {
+                if (spacesService.debug) {
+                    console.log(`Ignoring event because windowId ${windowId} is marked as closed.`);
+                }
                 return;
             }
 
