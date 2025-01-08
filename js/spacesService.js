@@ -1,3 +1,14 @@
+/**
+ * spacesService.js
+ * Core service module for managing browser window spaces/sessions
+ * 
+ * This module provides the core functionality for the Spaces extension, handling:
+ * - Session management (creating, updating, deleting spaces)
+ * - Window tracking and synchronization
+ * - Tab history management
+ * - Space/session state persistence
+ */
+
 /* global chrome, dbService */
 
 /* spaces
@@ -6,22 +17,47 @@
 
 import { dbService } from "./dbService.js";
 
-// eslint-disable-next-line no-var
+// Core service object that manages all spaces/sessions functionality
 export var spacesService = {
+    // Map to track tab URL history for proper history management
     tabHistoryUrlMap: {},
+    
+    // Track windows that have been closed to prevent duplicate processing
     closedWindowIds: {},
+    
+    // Array of all active and saved sessions
     sessions: [],
+    
+    // Timers for debouncing session updates
     sessionUpdateTimers: {},
+    
+    // Queue for tracking tab history changes
     historyQueue: [],
+    
+    // Counter for tracking event processing order
     eventQueueCount: 0,
+    
+    // Track extension version for migration purposes
     lastVersion: 0,
+    
+    // Debug flag for development
     debug: false,
+    
+    // Queue for processing async operations
     queue: [],
+    
+    // Flag to prevent concurrent processing
     isProcessing: false,
 
+    // Empty callback function
     noop: () => {},
 
-    // initialise spaces - combine open windows with saved sessions
+    /**
+     * Initialize the spaces service
+     * - Updates version information
+     * - Loads saved sessions from database
+     * - Matches current windows with saved sessions
+     */
     initialiseSpaces: async () => {
         // update version numbers
         spacesService.lastVersion = await spacesService.fetchLastVersion();
@@ -42,7 +78,6 @@ export var spacesService = {
 
                 // clear any previously saved windowIds
                 spacesService.sessions.forEach(session => {
-                    // eslint-disable-next-line no-param-reassign
                     session.windowId = false;
                 });
 
@@ -56,9 +91,12 @@ export var spacesService = {
         });
     },
 
+    /**
+     * Reset session hashes for all sessions
+     * Used during version upgrades or data migrations
+     */
     resetAllSessionHashes: sessions => {
         sessions.forEach(session => {
-            // eslint-disable-next-line no-param-reassign
             session.sessionHash = spacesService.generateSessionHash(
                 session.tabs
             );
@@ -66,7 +104,10 @@ export var spacesService = {
         });
     },
 
-    // record each tab's id and url so we can add history items when tabs are removed
+    /**
+     * Initialize tab history tracking
+     * Maps tab IDs to their URLs for history management
+     */
     initialiseTabHistory: () => {
         chrome.tabs.query({}, tabs => {
             tabs.forEach(tab => {
@@ -75,26 +116,26 @@ export var spacesService = {
         });
     },
 
-    // NOTE: if ever changing this funciton, then we'll need to update all
-    // saved sessionHashes so that they match next time, using: resetAllSessionHashes()
+    /**
+     * Clean URL by removing fragments, query parameters and handling suspended tabs
+     * @param {string} url - URL to clean
+     * @returns {string} Cleaned URL
+     */
     _cleanUrl: url => {
         if (!url) {
             return '';
         }
 
-        // ignore urls from this extension
         if (url.indexOf(chrome.runtime.id) >= 0) {
             return '';
         }
 
-        // ignore 'new tab' pages
         if (url.indexOf('chrome:// newtab/') >= 0) {
             return '';
         }
 
         let cleanUrl = url;
 
-        // add support for 'The Great Suspender'
         if (
             cleanUrl.indexOf('suspended.html') > 0 &&
             cleanUrl.indexOf('uri=') > 0
@@ -105,12 +146,10 @@ export var spacesService = {
             );
         }
 
-        // remove any text after a '#' symbol
         if (cleanUrl.indexOf('#') > 0) {
             cleanUrl = cleanUrl.substring(0, cleanUrl.indexOf('#'));
         }
 
-        // remove any text after a '?' symbol
         if (cleanUrl.indexOf('?') > 0) {
             cleanUrl = cleanUrl.substring(0, cleanUrl.indexOf('?'));
         }
@@ -118,6 +157,12 @@ export var spacesService = {
         return cleanUrl;
     },
 
+    /**
+     * Generate a unique hash for a session based on its tabs
+     * Used for matching windows with saved sessions
+     * @param {Array} tabs - Array of tab objects
+     * @returns {number} Hash value
+     */
     generateSessionHash: tabs => {
         const text = tabs.reduce((prevStr, tab) => {
             return prevStr + spacesService._cleanUrl(tab.url);
@@ -127,16 +172,18 @@ export var spacesService = {
         if (text.length === 0) return hash;
         for (let i = 0, len = text.length; i < len; i += 1) {
             const chr = text.charCodeAt(i);
-            // eslint-disable-next-line no-bitwise
             hash = (hash << 5) - hash + chr;
-            // eslint-disable-next-line no-bitwise
             hash |= 0; // Convert to 32bit integer
         }
         return Math.abs(hash);
     },
 
+    /**
+     * Filter out internal extension windows
+     * @param {Object} curWindow - Window object to check
+     * @returns {boolean} True if window is internal
+     */
     filterInternalWindows: curWindow => {
-        // sanity check to make sure window isnt an internal spaces window
         if (
             curWindow.tabs.length === 1 &&
             curWindow.tabs[0].url.indexOf(chrome.runtime.id) >= 0
@@ -144,13 +191,17 @@ export var spacesService = {
             return true;
         }
 
-        // also filter out popup or panel window types
         if (curWindow.type === 'popup' || curWindow.type === 'panel') {
             return true;
         }
         return false;
     },
 
+    /**
+     * Check if a window matches any saved session
+     * If match found, link window with session
+     * If no match, create temporary session
+     */
     checkForSessionMatch: curWindow => {
         if (!curWindow.tabs || curWindow.tabs.length === 0) {
             return;
@@ -166,33 +217,31 @@ export var spacesService = {
         );
 
         if (matchingSession) {
-            if (spacesService.debug)
-                // eslint-disable-next-line no-console
+            if (spacesService.debug) {
                 console.log(
                     `matching session found: ${matchingSession.id}. linking with window: ${curWindow.id}`
                 );
-
+            }
             spacesService.matchSessionToWindow(matchingSession, curWindow);
         }
 
-        // if no match found and this window does not already have a temporary session
         if (!matchingSession && !temporarySession) {
-            if (spacesService.debug)
-                // eslint-disable-next-line no-console
+            if (spacesService.debug) {
                 console.log(
                     `no matching session found. creating temporary session for window: ${curWindow.id}`
                 );
-
-            // create a new temporary session for this window (with no sessionId or name)
+            }
             spacesService.createTemporaryUnmatchedSession(curWindow);
         }
     },
 
+    /**
+     * Link a session with a window
+     * Updates session tracking and handles name preservation
+     */
     matchSessionToWindow: (session, curWindow) => {
-        // Save old  session name
         let oldSessionName = false;
         
-        // Remove other sessions bound to this windowId
         for (let i = spacesService.sessions.length - 1; i >= 0; i--) {
             if (spacesService.sessions[i].windowId === curWindow.id) {
                 if (spacesService.sessions[i].id) {
@@ -204,59 +253,58 @@ export var spacesService = {
             }
         }
 
-        // If new session has no name but has old name, keep the old name
         if (!session.name && oldSessionName) {
             session.name = oldSessionName;
         }
 
-        // Assign windowId to new matching session
         session.windowId = curWindow.id;
     },
 
+    /**
+     * Create a temporary session for an unmatched window
+     * Used when a window doesn't match any saved session
+     */
     createTemporaryUnmatchedSession: curWindow => {
         if (spacesService.debug) {
-            // eslint-disable-next-line no-console
-            console.dir(spacesService.sessions);
-            // eslint-disable-next-line no-console
-            console.dir(curWindow);
-            // eslint-disable-next-line no-console
             console.log('Could not match window. Creating temporary session.');
         }
 
-        // Calculate sessionHash first
         const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
         
-        // Check if there's an existing session with the same windowId
         const existingSession = spacesService.sessions.find(s => s.windowId === curWindow.id);
         const existingName = existingSession ? existingSession.name : false;
 
-        // Create new temporary session
         const newSession = {
             id: false,
             windowId: curWindow.id,
             sessionHash,
-            name: existingName, // Keep original name
+            name: existingName,
             tabs: curWindow.tabs,
             history: [],
             lastAccess: new Date(),
         };
 
-        // Add new session to sessions array
         spacesService.sessions.push(newSession);
 
-        // If it has a name, save to database immediately
+        // 若該視窗已有暫存名稱，馬上儲存到 DB
         if (existingName) {
             spacesService.saveNewSession(existingName, curWindow.tabs, curWindow.id, () => {
-                // Update UI
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[createTemporaryUnmatchedSession] ' + chrome.runtime.lastError.message);
+                    }
                 });
             });
         }
     },
 
-    // local storage getters/setters
+    /**
+     * Fetch the last known version of the extension
+     * Used for migration and update handling
+     */
     fetchLastVersion: async () => {
         let {spacesVersion: version} = await chrome.storage.local.get('spacesVersion');
         if (version != null) {
@@ -266,35 +314,31 @@ export var spacesService = {
         return 0;
     },
 
+    /**
+     * Update the stored version number
+     * @param {string} newVersion - New version to store
+     */
     setLastVersion: async newVersion => {
         await chrome.storage.local.set({'spacesVersion': JSON.stringify(newVersion)});
     },
 
-    // event listener functions for window and tab events
-    // (events are received and screened first in background.js)
-    // -----------------------------------------------------------------------------------------
-
+    /**
+     * Handle tab removal events
+     * Updates history and session state accordingly
+     */
     handleTabRemoved: (tabId, removeInfo, callback) => {
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
+        if (spacesService.debug) {
             console.log(
                 `handlingTabRemoved event. windowId: ${removeInfo.windowId}`
             );
+        }
 
-        // NOTE: isWindowClosing is true if the window cross was clicked causing the tab to be removed.
-        // If the tab cross is clicked and it is the last tab in the window
-        // isWindowClosing will still be false even though the window will close
         if (removeInfo.isWindowClosing) {
-            // be very careful here as we definitley do not want these removals being saved
-            // as part of the session (effectively corrupting the session)
-
-            // should be handled by the window removed listener
             spacesService.handleWindowRemoved(
                 removeInfo.windowId,
                 true,
                 spacesService.noop
             );
-
         } else {
             spacesService.historyQueue.push({
                 url: spacesService.tabHistoryUrlMap[tabId],
@@ -307,32 +351,38 @@ export var spacesService = {
                 callback
             );
 
-            // remove tab from tabHistoryUrlMap
             delete spacesService.tabHistoryUrlMap[tabId];
         }
     },
+
+    /**
+     * Handle tab movement between windows
+     * Updates session state to reflect new tab positions
+     */
     handleTabMoved: (tabId, moveInfo, callback) => {
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
+        if (spacesService.debug) {
             console.log(
                 `handlingTabMoved event. windowId: ${moveInfo.windowId}`
             );
+        }
         spacesService.queueWindowEvent(
             moveInfo.windowId,
             spacesService.eventQueueCount,
             callback
         );
     },
+
+    /**
+     * Handle tab updates (URL changes, loading status)
+     * Updates history and session state
+     */
     handleTabUpdated: (tab, changeInfo, callback) => {
-        // NOTE: only queue event when tab has completed loading (title property exists at this point)
         if (tab.status === 'complete') {
-            if (spacesService.debug)
-                // eslint-disable-next-line no-console
+            if (spacesService.debug) {
                 console.log(
                     `handlingTabUpdated event. windowId: ${tab.windowId}`
                 );
-
-            // update tab history in case the tab url has changed
+            }
             spacesService.tabHistoryUrlMap[tab.id] = tab.url;
             spacesService.queueWindowEvent(
                 tab.windowId,
@@ -341,9 +391,7 @@ export var spacesService = {
             );
         }
 
-        // check for change in tab url. if so, update history
         if (changeInfo.url) {
-            // add tab to history queue as an item to be removed (as it is open for this window)
             spacesService.historyQueue.push({
                 url: changeInfo.url,
                 windowId: tab.windowId,
@@ -351,33 +399,32 @@ export var spacesService = {
             });
         }
     },
+
+    /**
+     * Handle window removal
+     * Updates session state and handles cleanup
+     */
     handleWindowRemoved: (windowId, markAsClosed, callback) => {
-        // ignore subsequent windowRemoved events for the same windowId (each closing tab will try to call this)
         if (spacesService.closedWindowIds[windowId]) {
             callback();
         }
 
-        if (spacesService.debug)
-            // eslint-disable-next-line no-console
+        if (spacesService.debug) {
             console.log(`handlingWindowRemoved event. windowId: ${windowId}`);
+        }
 
-        // add windowId to closedWindowIds. the idea is that once a window is closed it can never be
-        // rematched to a new session (hopefully these window ids never get legitimately re-used)
         if (markAsClosed) {
-            if (spacesService.debug)
-                // eslint-disable-next-line no-console
+            if (spacesService.debug) {
                 console.log(`adding window to closedWindowIds: ${windowId}`);
+            }
             spacesService.closedWindowIds[windowId] = true;
             clearTimeout(spacesService.sessionUpdateTimers[windowId]);
         }
 
         const session = spacesService.getSessionByWindowId(windowId);
         if (session) {
-            // if this is a saved session then just remove the windowId reference
             if (session.id) {
                 session.windowId = false;
-
-            // else if it is temporary session then remove the session from the cache
             } else {
                 spacesService.sessions.some((curSession, index) => {
                     if (curSession.windowId === windowId) {
@@ -393,8 +440,8 @@ export var spacesService = {
     },
 
     /**
-     * [修訂] 在 Focus 時只更新 lastAccess，不覆寫使用者自訂的 session.name
-     * 並先檢查 DB 內該 session 是否仍存在，以避免「Failed to save session」。
+     * Handle window focus events
+     * Updates session access times and handles UI updates
      */
     handleWindowFocussed: (windowId) => {
         if (windowId <= 0) return;
@@ -402,7 +449,6 @@ export var spacesService = {
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
 
-        // If session.id doesn't exist, it's a temporary (unnamed) session, skip DB update
         if (!session.id) {
             if (spacesService.debug) {
                 console.warn('[spacesService] handleWindowFocussed: temporary session, skip DB update');
@@ -410,10 +456,8 @@ export var spacesService = {
             return;
         }
 
-        // Push update task to queue to avoid race condition
         spacesService.queue.push(async () => {
             try {
-                // First pull latest session from DB (skip if not found)
                 const dbSession = await new Promise(resolve => {
                     dbService.fetchSessionById(session.id, found => resolve(found));
                 });
@@ -422,20 +466,15 @@ export var spacesService = {
                     return;
                 }
 
-                // If local session.name is not empty and different from dbSession.name, override DB with local value
-                // Avoid accidentally overwriting user's recently changed name
                 if (session.name && session.name.trim() !== '' && session.name !== dbSession.name) {
                     dbSession.name = session.name;
                 } else {
-                    // If local has no specific name, apply name from DB
                     session.name = dbSession.name;
                 }
 
-                // Only update lastAccess and windowId, don't touch other properties to avoid race condition
                 session.lastAccess = new Date();
                 session.windowId = windowId;
 
-                // Write back to DB
                 await new Promise((resolve, reject) => {
                     dbService.updateSession(session, updated => {
                         if (!updated) {
@@ -446,12 +485,14 @@ export var spacesService = {
                     });
                 });
 
-                // Send update message to UI
-                await new Promise(resolve => {
-                    chrome.runtime.sendMessage({
-                        action: 'updateSpaces',
-                        spaces: spacesService.getAllSessions()
-                    }, () => resolve());
+                // 發送更新事件給 UI，但避免錯誤
+                chrome.runtime.sendMessage({
+                    action: 'updateSpaces',
+                    spaces: spacesService.getAllSessions()
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
+                    }
                 });
 
             } catch (error) {
@@ -462,16 +503,15 @@ export var spacesService = {
             }
         });
 
-        // If queue is not being processed, start processQueue()
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
     },
 
-    // 1sec timer-based batching system.
-    // Set a timeout so that multiple tabs all opened at once (like when restoring a session)
-    // only trigger this function once (as per the timeout set by the last tab event)
-    // This will cause multiple triggers if time between tab openings is longer than 1 sec
+    /**
+     * Queue window events for processing
+     * Implements debouncing to prevent excessive updates
+     */
     queueWindowEvent: (windowId, eventId, callback) => {
         clearTimeout(spacesService.sessionUpdateTimers[windowId]);
 
@@ -482,7 +522,10 @@ export var spacesService = {
         }, 1000);
     },
 
-    // careful here as this function gets called A LOT
+    /**
+     * Process queued window events
+     * Updates session state and handles UI synchronization
+     */
     handleWindowEvent: (windowId, eventId, callback) => {
         callback = typeof callback !== 'function' ? spacesService.noop : callback;
         if (spacesService.debug) {
@@ -497,10 +540,8 @@ export var spacesService = {
         }
 
         chrome.windows.get(windowId, { populate: true }, (curWindow) => {
-            // If unable to get the window, it means it's closed or invalid
             if (chrome.runtime.lastError) {
                 console.warn(`[handleWindowEvent] ${chrome.runtime.lastError.message}. Skip event.`);
-                // If window not found, remove windowId from corresponding session to prevent "ghost" state
                 spacesService.handleWindowRemoved(windowId, false, spacesService.noop);
                 return;
             }
@@ -517,31 +558,17 @@ export var spacesService = {
                 return;
             }
 
-            // don't allow event if it pertains to a closed window id
-            if (spacesService.closedWindowIds[windowId]) {
-                if (spacesService.debug)
-                    // eslint-disable-next-line no-console
-                    console.log(
-                        `ignoring event as it pertains to a closed windowId: ${windowId}`
-                    );
-                return;
-            }
-
-            // if window is associated with an open session then update session
             const session = spacesService.getSessionByWindowId(windowId);
 
             if (session) {
-                if (spacesService.debug)
-                    // eslint-disable-next-line no-console
+                if (spacesService.debug) {
                     console.log(
                         `tab statuses: ${curWindow.tabs
-                            .map(curTab => {
-                                return curTab.status;
-                            })
+                            .map(curTab => curTab.status)
                             .join('|')}`
                     );
+                }
 
-                // look for tabs recently added/removed from this session and update session history
                 const historyItems = spacesService.historyQueue.filter(
                     historyItem => {
                         return historyItem.windowId === windowId;
@@ -565,11 +592,7 @@ export var spacesService = {
                     spacesService.historyQueue.splice(i, 1);
                 }
 
-                // ---------------------------------------------------------
-                // ★★ Ensure session.tabs has pinned property ★★
-                // ---------------------------------------------------------
                 session.tabs = curWindow.tabs.map(t => ({
-                    // Keep all necessary properties
                     ...t,
                     pinned: t.pinned
                 }));
@@ -578,26 +601,17 @@ export var spacesService = {
                     session.tabs
                 );
 
-                // if it is a saved session then update db
                 if (session.id) {
                     spacesService.saveExistingSession(session.id);
                 }
             }
 
-            // if no session found, it must be a new window.
-            // if session found without session.id then it must be a temporary session
-            // check for sessionMatch
             if (!session || !session.id) {
                 if (spacesService.debug) {
                     console.log('session check triggered');
                 }
-                // Save current session name
                 const currentName = session ? session.name : false;
-                
-                // Check session matching
                 spacesService.checkForSessionMatch(curWindow);
-                
-                // If it has a name, update the newly created temporary session
                 if (currentName) {
                     const newSession = spacesService.getSessionByWindowId(curWindow.id);
                     if (newSession) {
@@ -609,20 +623,33 @@ export var spacesService = {
         });
     },
 
-    // PUBLIC FUNCTIONS
-
+    /**
+     * Get session by its ID
+     * @returns {Object|false} Session object or false if not found
+     */
     getSessionBySessionId: sessionId => {
         const result = spacesService.sessions.filter(session => {
             return session.id === sessionId;
         });
         return result.length === 1 ? result[0] : false;
     },
+
+    /**
+     * Get session by window ID
+     * @returns {Object|false} Session object or false if not found
+     */
     getSessionByWindowId: windowId => {
         const result = spacesService.sessions.filter(session => {
             return session.windowId === windowId;
         });
         return result.length === 1 ? result[0] : false;
     },
+
+    /**
+     * Get session by its hash
+     * @param {boolean} closedOnly - If true, only return closed sessions
+     * @returns {Object|false} Session object or false if not found
+     */
     getSessionBySessionHash: (hash, closedOnly) => {
         const result = spacesService.sessions.filter(session => {
             if (closedOnly) {
@@ -632,6 +659,11 @@ export var spacesService = {
         });
         return result.length >= 1 ? result[0] : false;
     },
+
+    /**
+     * Get session by its name
+     * @returns {Object|false} Session object or false if not found
+     */
     getSessionByName: name => {
         const result = spacesService.sessions.filter(session => {
             return (
@@ -641,24 +673,29 @@ export var spacesService = {
         });
         return result.length >= 1 ? result[0] : false;
     },
+
+    /**
+     * Get all active sessions
+     * @returns {Array} Array of all sessions
+     */
     getAllSessions: () => {
         return spacesService.sessions;
     },
 
+    /**
+     * Add URL to session history
+     * Manages the history stack for a session
+     */
     addUrlToSessionHistory: (session, newUrl) => {
         if (spacesService.debug) {
-            // eslint-disable-next-line no-console
             console.log(`adding tab to history: ${newUrl}`);
         }
 
         const cleanUrl = spacesService._cleanUrl(newUrl);
-
         if (cleanUrl.length === 0) {
             return false;
         }
 
-        // don't add removed tab to history if there is still a tab open with same url
-        // note: assumes tab has NOT already been removed from session.tabs
         const tabBeingRemoved = session.tabs.filter(curTab => {
             return spacesService._cleanUrl(curTab.url) === cleanUrl;
         });
@@ -667,10 +704,8 @@ export var spacesService = {
             return false;
         }
 
-        // eslint-disable-next-line no-param-reassign
         if (!session.history) session.history = [];
 
-        // see if tab already exists in history. if so then remove it (it will be re-added)
         session.history.some((historyTab, index) => {
             if (spacesService._cleanUrl(historyTab.url) === cleanUrl) {
                 session.history.splice(index, 1);
@@ -679,31 +714,26 @@ export var spacesService = {
             return false;
         });
 
-        // add url to session history
-        // eslint-disable-next-line no-param-reassign
         session.history = tabBeingRemoved.concat(session.history);
-
-        // trim history for this space down to last 200 items
-        // eslint-disable-next-line no-param-reassign
         session.history = session.history.slice(0, 200);
 
         return session;
     },
 
+    /**
+     * Remove URL from session history
+     * Used when tabs are closed or URLs change
+     */
     removeUrlFromSessionHistory: (session, newUrl) => {
         if (spacesService.debug) {
-            // eslint-disable-next-line no-console
             console.log(`removing tab from history: ${newUrl}`);
         }
 
-        // eslint-disable-next-line no-param-reassign
         newUrl = spacesService._cleanUrl(newUrl);
-
         if (newUrl.length === 0) {
             return;
         }
 
-        // see if tab already exists in history. if so then remove it
         session.history.some((historyTab, index) => {
             if (spacesService._cleanUrl(historyTab.url) === newUrl) {
                 session.history.splice(index, 1);
@@ -713,26 +743,23 @@ export var spacesService = {
         });
     },
 
-    // Database actions
-
+    /**
+     * Update tabs for an existing session
+     * @param {string} sessionId - ID of session to update
+     * @param {Array} tabs - New tabs array
+     */
     updateSessionTabs: (sessionId, tabs, callback) => {
         const session = spacesService.getSessionBySessionId(sessionId);
+        callback = typeof callback !== 'function' ? spacesService.noop : callback;
 
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
-
-        // update tabs in session
         session.tabs = tabs;
         session.sessionHash = spacesService.generateSessionHash(session.tabs);
-
         spacesService.saveExistingSession(session.id, callback);
     },
 
     /**
-     * 更新指定會話的窗口 ID
-     * @param {number} sessionId - 會話的 ID
-     * @param {number} windowId - 新窗口的 ID
+     * Update window ID for a session
+     * Used when linking sessions with windows
      */
     updateSessionWindowId: async (sessionId, windowId) => {
         const session = spacesService.getSessionBySessionId(sessionId);
@@ -744,31 +771,33 @@ export var spacesService = {
         }
     },
 
+    /**
+     * Update session name
+     * Handles name conflicts and updates storage
+     */
     updateSessionName: (sessionId, sessionName, callback) => {
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
+        callback = typeof callback !== 'function' ? spacesService.noop : callback;
 
         const session = spacesService.getSessionBySessionId(sessionId);
         session.name = sessionName;
-
         spacesService.saveExistingSession(session.id, callback);
     },
 
     /**
-     * 這裡是原本的 saveExistingSession，接受 sessionId，
-     * 內部用 dbService.updateSession( session, callback )。
+     * Save changes to an existing session
+     * Updates database and triggers UI refresh
      */
     saveExistingSession: (sessionId, callback) => {
         const session = spacesService.getSessionBySessionId(sessionId);
-
-        // If no callback provided, use noop function
         callback = typeof callback === 'function' ? callback : spacesService.noop;
 
-        // Update session and call callback
         dbService.updateSession(session, callback);
     },
 
+    /**
+     * Create and save a new session
+     * Handles window linking and storage
+     */
     saveNewSession: (sessionName, tabs, windowId, callback) => {
         if (!tabs) {
             callback(false);
@@ -778,16 +807,12 @@ export var spacesService = {
         try {
             const sessionHash = spacesService.generateSessionHash(tabs);
             let session;
-
-            // Ensure callback function exists
             callback = typeof callback === 'function' ? callback : spacesService.noop;
 
-            // Check temporary session corresponding to window ID
             if (windowId) {
                 session = spacesService.getSessionByWindowId(windowId);
             }
 
-            // If no temporary session found, create new one
             if (!session) {
                 session = {
                     windowId,
@@ -796,17 +821,14 @@ export var spacesService = {
                 spacesService.sessions.push(session);
             }
 
-            // Update session details
             session.name = sessionName;
             session.sessionHash = sessionHash;
             session.tabs = tabs;
             session.lastAccess = new Date();
 
-            // Save to database
             dbService.createSession(session, savedSession => {
                 try {
                     if (savedSession) {
-                        // Update session ID in cache
                         session.id = savedSession.id;
                         callback(savedSession);
                         console.log('saveNewSession about to store tabs =>', JSON.stringify(tabs, null, 2));
@@ -826,13 +848,14 @@ export var spacesService = {
         }
     },
 
+    /**
+     * Delete a session
+     * Removes from memory and storage
+     */
     deleteSession: (sessionId, callback) => {
-        // eslint-disable-next-line no-param-reassign
-        callback =
-            typeof callback !== 'function' ? spacesService.noop : callback;
+        callback = typeof callback !== 'function' ? spacesService.noop : callback;
 
         dbService.removeSession(sessionId, () => {
-            // remove session from cached array
             spacesService.sessions.some((session, index) => {
                 if (session.id === sessionId) {
                     spacesService.sessions.splice(index, 1);
@@ -844,6 +867,10 @@ export var spacesService = {
         });
     },
 
+    /**
+     * Process the async operation queue
+     * Ensures sequential processing of updates
+     */
     processQueue: () => {
         if (spacesService.isProcessing || spacesService.queue.length === 0) {
             return;
@@ -852,14 +879,12 @@ export var spacesService = {
         spacesService.isProcessing = true;
         const update = spacesService.queue.shift();
         
-        // Use Promise to handle asynchronous operations
         Promise.resolve(update())
             .catch(error => {
                 console.error('Error processing queue item:', error);
             })
             .finally(() => {
                 spacesService.isProcessing = false;
-                // Check if there are other tasks to process
                 if (spacesService.queue.length > 0) {
                     spacesService.processQueue();
                 }
