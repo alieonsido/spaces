@@ -471,7 +471,7 @@ export var spacesService = {
                     return;
                 }
 
-                // --------------------- Fix: Prevent overwriting existing sessionName with empty name ---------------------
+                // --------------------- Fix: Session Name Priority Logic ---------------------
                 // If memory has a valid sessionName (non-empty), prioritize it and write back to DB
                 if (session.name && session.name.trim() !== '') {
                     dbSession.name = session.name;
@@ -497,7 +497,7 @@ export var spacesService = {
                     });
                 });
 
-                // Notify frontend UI (spaces.html etc) to update; if UI is not open, will receive "Receiving end does not exist."
+                // Notify frontend UI to update; if UI is not open, will receive "Receiving end does not exist."
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
@@ -553,7 +553,7 @@ export var spacesService = {
             }
             return;
         }
-
+    
         chrome.windows.get(windowId, { populate: true }, (curWindow) => {
             if (chrome.runtime.lastError) {
                 console.warn(`[handleWindowEvent] ${chrome.runtime.lastError.message}. Skip event.`);
@@ -561,21 +561,22 @@ export var spacesService = {
                 return;
             }
             if (!curWindow) return;
-
+    
             if (spacesService.filterInternalWindows(curWindow)) {
                 return;
             }
-
+    
             if (spacesService.closedWindowIds[windowId]) {
                 if (spacesService.debug) {
                     console.log(`Ignoring event because windowId ${windowId} is marked as closed.`);
                 }
                 return;
             }
-
+    
             const session = spacesService.getSessionByWindowId(windowId);
-
+    
             if (session) {
+                // Update tabs and history
                 if (spacesService.debug) {
                     console.log(
                         `tab statuses: ${curWindow.tabs
@@ -583,16 +584,14 @@ export var spacesService = {
                             .join('|')}`
                     );
                 }
-
+    
                 const historyItems = spacesService.historyQueue.filter(
-                    historyItem => {
-                        return historyItem.windowId === windowId;
-                    }
+                    historyItem => historyItem.windowId === windowId
                 );
-
+    
                 for (let i = historyItems.length - 1; i >= 0; i -= 1) {
                     const historyItem = historyItems[i];
-
+    
                     if (historyItem.action === 'add') {
                         spacesService.addUrlToSessionHistory(
                             session,
@@ -606,27 +605,35 @@ export var spacesService = {
                     }
                     spacesService.historyQueue.splice(i, 1);
                 }
-
+    
                 session.tabs = curWindow.tabs.map(t => ({
                     ...t,
                     pinned: t.pinned
                 }));
-
-                session.sessionHash = spacesService.generateSessionHash(
-                    session.tabs
-                );
-
+                session.sessionHash = spacesService.generateSessionHash(session.tabs);
+    
+                // ① If session already has an ID, save updates directly
                 if (session.id) {
                     spacesService.saveExistingSession(session.id);
                 }
+                // ② If session is temporary but has a name (session.name non-empty), save it to DB immediately to avoid being overwritten by subsequent logic
+                else if (session.name && session.name.trim() !== '') {
+                    spacesService.saveNewSession(session.name, session.tabs, session.windowId, () => {
+                        // Execute callback regardless of success or failure
+                        callback();
+                    });
+                }
             }
-
+    
+            // If there's no session or session.id=false and no name, check for auto-matching or create temporary storage
             if (!session || !session.id) {
                 if (spacesService.debug) {
                     console.log('session check triggered');
                 }
                 const currentName = session ? session.name : false;
                 spacesService.checkForSessionMatch(curWindow);
+    
+                // If the window originally had a temporary name, carry it over to the newly matched session
                 if (currentName) {
                     const newSession = spacesService.getSessionByWindowId(curWindow.id);
                     if (newSession) {
