@@ -317,23 +317,23 @@ import * as utils from './utils.js';
         if (sessionId) {
             performSessionUpdate(newName, sessionId, session => {
                 if (session) {
-                    // 更新當前空間的名稱
+                    // Update current space name
                     globalSelectedSpace.name = newName;
                     updateNameForm(globalSelectedSpace);
                     toggleNameEditMode(false);
-                    // 更新空間列表
+                    // Update space list
                     updateSpacesList();
                 }
             });
         } else if (windowId) {
             performNewSessionSave(newName, windowId, session => {
                 if (session) {
-                    // 更新當前空間的資訊
+                    // Update current space information
                     globalSelectedSpace.sessionId = session.id;
                     globalSelectedSpace.name = newName;
                     updateNameForm(globalSelectedSpace);
                     toggleNameEditMode(false);
-                    // 更新空間列表
+                    // Update space list
                     updateSpacesList();
                 }
             });

@@ -25,7 +25,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
         const url = utils.getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
 
-        // 先從 Hash 讀取 windowId
+        // Read windowId from Hash first
         const windowId = utils.getHashVariable('windowId', window.location.href);
         globalWindowId = windowId !== '' ? windowId : false;
 
@@ -35,7 +35,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
 
         const action = utils.getHashVariable('action', window.location.href);
 
-        // [修訂處] 若 Hash 未帶入 windowId，則試著抓當前 active window (同 Spaces-Switch 做法)
+        // [Revision] If windowId is not in Hash, try to get the current active window (same as Spaces-Switch approach)
         if (!globalWindowId) {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs && tabs.length > 0) {
@@ -43,7 +43,7 @@ const spaces = Comlink.wrap(createEndpoint(chrome.runtime.connect()));
             }
         }
 
-        // 根據有無 windowId 來決定要用 requestSpaceFromWindowId 還是 requestCurrentSpace
+        // Decide whether to use requestSpaceFromWindowId or requestCurrentSpace based on windowId existence
         const requestSpacePromise = globalWindowId
             ? spaces.requestSpaceFromWindowId(parseInt(globalWindowId, 10))
             : spaces.requestCurrentSpace();

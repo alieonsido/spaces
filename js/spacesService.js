@@ -189,10 +189,10 @@ export var spacesService = {
     },
 
     matchSessionToWindow: (session, curWindow) => {
-        // 保存舊 session 的名稱
+        // Save old  session name
         let oldSessionName = false;
         
-        // 移除其他綁定到此 windowId 的 sessions
+        // Remove other sessions bound to this windowId
         for (let i = spacesService.sessions.length - 1; i >= 0; i--) {
             if (spacesService.sessions[i].windowId === curWindow.id) {
                 if (spacesService.sessions[i].id) {
@@ -204,12 +204,12 @@ export var spacesService = {
             }
         }
 
-        // 如果新 session 沒有名稱但有舊名稱，則保留舊名稱
+        // If new session has no name but has old name, keep the old name
         if (!session.name && oldSessionName) {
             session.name = oldSessionName;
         }
 
-        // 分配 windowId 給新匹配的 session
+        // Assign windowId to new matching session
         session.windowId = curWindow.id;
     },
 
@@ -223,31 +223,31 @@ export var spacesService = {
             console.log('Could not match window. Creating temporary session.');
         }
 
-        // 先計算 sessionHash
+        // Calculate sessionHash first
         const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
         
-        // 檢查是否存在相同 windowId 的舊 session
+        // Check if there's an existing session with the same windowId
         const existingSession = spacesService.sessions.find(s => s.windowId === curWindow.id);
         const existingName = existingSession ? existingSession.name : false;
 
-        // 創建新的臨時 session
+        // Create new temporary session
         const newSession = {
             id: false,
             windowId: curWindow.id,
             sessionHash,
-            name: existingName, // 保留原有名稱
+            name: existingName, // Keep original name
             tabs: curWindow.tabs,
             history: [],
             lastAccess: new Date(),
         };
 
-        // 將新 session 加入到 sessions 陣列
+        // Add new session to sessions array
         spacesService.sessions.push(newSession);
 
-        // 如果有名稱，立即保存到資料庫
+        // If it has a name, save to database immediately
         if (existingName) {
             spacesService.saveNewSession(existingName, curWindow.tabs, curWindow.id, () => {
-                // 更新 UI
+                // Update UI
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
@@ -402,7 +402,7 @@ export var spacesService = {
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
 
-        // 若 session.id 不存在，表示是暫存(unnamed) session，不進行 DB 更新
+        // If session.id doesn't exist, it's a temporary (unnamed) session, skip DB update
         if (!session.id) {
             if (spacesService.debug) {
                 console.warn('[spacesService] handleWindowFocussed: temporary session, skip DB update');
@@ -410,10 +410,10 @@ export var spacesService = {
             return;
         }
 
-        // 將更新任務 push 進 queue，避免 race condition
+        // Push update task to queue to avoid race condition
         spacesService.queue.push(async () => {
             try {
-                // 先從 DB 拉出最新的 session (若找不到，則略過處理)
+                // First pull latest session from DB (skip if not found)
                 const dbSession = await new Promise(resolve => {
                     dbService.fetchSessionById(session.id, found => resolve(found));
                 });
@@ -422,20 +422,20 @@ export var spacesService = {
                     return;
                 }
 
-                // 若本地 session.name 不為空，而且與 dbSession.name 不同，以「本地為準」覆蓋 DB
-                // 避免意外覆蓋使用者剛剛改好的名稱
+                // If local session.name is not empty and different from dbSession.name, override DB with local value
+                // Avoid accidentally overwriting user's recently changed name
                 if (session.name && session.name.trim() !== '' && session.name !== dbSession.name) {
                     dbSession.name = session.name;
                 } else {
-                    // 若本地沒有特別命名，則反向套用 DB 裏的名稱
+                    // If local has no specific name, apply name from DB
                     session.name = dbSession.name;
                 }
 
-                // 僅更新 lastAccess 和 windowId，其它屬性不要動，以免 race condition
+                // Only update lastAccess and windowId, don't touch other properties to avoid race condition
                 session.lastAccess = new Date();
                 session.windowId = windowId;
 
-                // 寫回 DB
+                // Write back to DB
                 await new Promise((resolve, reject) => {
                     dbService.updateSession(session, updated => {
                         if (!updated) {
@@ -446,7 +446,7 @@ export var spacesService = {
                     });
                 });
 
-                // 發送更新訊息給 UI
+                // Send update message to UI
                 await new Promise(resolve => {
                     chrome.runtime.sendMessage({
                         action: 'updateSpaces',
@@ -462,7 +462,7 @@ export var spacesService = {
             }
         });
 
-        // 若目前沒在處理 queue，啟動 processQueue()
+        // If queue is not being processed, start processQueue()
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
@@ -497,10 +497,10 @@ export var spacesService = {
         }
 
         chrome.windows.get(windowId, { populate: true }, (curWindow) => {
-            // 若無法 get 到該 window，代表已關閉或無效
+            // If unable to get the window, it means it's closed or invalid
             if (chrome.runtime.lastError) {
                 console.warn(`[handleWindowEvent] ${chrome.runtime.lastError.message}. Skip event.`);
-                // 若找不到該 window，就把對應 session 的 windowId 移除，防止「幽靈」狀態
+                // If window not found, remove windowId from corresponding session to prevent "ghost" state
                 spacesService.handleWindowRemoved(windowId, false, spacesService.noop);
                 return;
             }
@@ -566,10 +566,10 @@ export var spacesService = {
                 }
 
                 // ---------------------------------------------------------
-                // ★★ 確保 session.tabs 存有 pinned 屬性 ★★
+                // ★★ Ensure session.tabs has pinned property ★★
                 // ---------------------------------------------------------
                 session.tabs = curWindow.tabs.map(t => ({
-                    // 保留所有必要的屬性
+                    // Keep all necessary properties
                     ...t,
                     pinned: t.pinned
                 }));
@@ -591,13 +591,13 @@ export var spacesService = {
                 if (spacesService.debug) {
                     console.log('session check triggered');
                 }
-                // 保存當前 session 名稱
+                // Save current session name
                 const currentName = session ? session.name : false;
                 
-                // 檢查 session 匹配
+                // Check session matching
                 spacesService.checkForSessionMatch(curWindow);
                 
-                // 如果有名稱，更新新建的臨時 session
+                // If it has a name, update the newly created temporary session
                 if (currentName) {
                     const newSession = spacesService.getSessionByWindowId(curWindow.id);
                     if (newSession) {
@@ -762,10 +762,10 @@ export var spacesService = {
     saveExistingSession: (sessionId, callback) => {
         const session = spacesService.getSessionBySessionId(sessionId);
 
-        // 如果沒有提供回調，使用 noop 函數
+        // If no callback provided, use noop function
         callback = typeof callback === 'function' ? callback : spacesService.noop;
 
-        // 更新 session 並調用回調
+        // Update session and call callback
         dbService.updateSession(session, callback);
     },
 
@@ -779,15 +779,15 @@ export var spacesService = {
             const sessionHash = spacesService.generateSessionHash(tabs);
             let session;
 
-            // 確保回調函數存在
+            // Ensure callback function exists
             callback = typeof callback === 'function' ? callback : spacesService.noop;
 
-            // 檢查窗口ID對應的臨時會話
+            // Check temporary session corresponding to window ID
             if (windowId) {
                 session = spacesService.getSessionByWindowId(windowId);
             }
 
-            // 如果沒有找到臨時會話，創建新的
+            // If no temporary session found, create new one
             if (!session) {
                 session = {
                     windowId,
@@ -796,17 +796,17 @@ export var spacesService = {
                 spacesService.sessions.push(session);
             }
 
-            // 更新會話詳情
+            // Update session details
             session.name = sessionName;
             session.sessionHash = sessionHash;
             session.tabs = tabs;
             session.lastAccess = new Date();
 
-            // 保存到數據庫
+            // Save to database
             dbService.createSession(session, savedSession => {
                 try {
                     if (savedSession) {
-                        // 更新緩存中的會話ID
+                        // Update session ID in cache
                         session.id = savedSession.id;
                         callback(savedSession);
                         console.log('saveNewSession about to store tabs =>', JSON.stringify(tabs, null, 2));
@@ -852,14 +852,14 @@ export var spacesService = {
         spacesService.isProcessing = true;
         const update = spacesService.queue.shift();
         
-        // 使用 Promise 來處理非同步操作
+        // Use Promise to handle asynchronous operations
         Promise.resolve(update())
             .catch(error => {
                 console.error('Error processing queue item:', error);
             })
             .finally(() => {
                 spacesService.isProcessing = false;
-                // 檢查是否還有其他任務需要處理
+                // Check if there are other tasks to process
                 if (spacesService.queue.length > 0) {
                     spacesService.processQueue();
                 }

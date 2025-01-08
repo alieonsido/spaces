@@ -351,7 +351,7 @@ var spaces = (() => {
         }
     });
 
-    // ★★ [已移除原 IIFE 自動建立 contextMenu 的段落] ★★
+    // ★★ [Removed original IIFE section for creating contextMenu] ★★
 
     chrome.contextMenus.onClicked.addListener(info => {
         if (info.menuItemId === 'spaces-add-link') {
@@ -642,7 +642,7 @@ var spaces = (() => {
             try {
                 const w = await chrome.windows.get(windowId, { populate: true });
                 const incompleteTab = w.tabs.find(t => t.status !== 'complete');
-                // 如果全部載入完 (找不到不是 complete 的 tab)，就回傳
+                // If all tabs are loaded (can't find any tab that's not complete), return
                 if (!incompleteTab) {
                     return w;
                 }
@@ -650,10 +650,10 @@ var spaces = (() => {
                 console.warn('waitForTabsComplete error:', err);
             }
             attempt += 1;
-            // 等候 1 秒再試
+            // Wait 1 second and try again
             await new Promise(r => setTimeout(r, 1000));
         }
-        // 即使超過次數也回傳
+        // Return even if exceeded max attempts
         return chrome.windows.get(windowId, { populate: true });
     }
 
@@ -1061,7 +1061,7 @@ var spaces = (() => {
         callback(true);
     }
 
-    // ★★ 已移除, move to spacesService.js ★★
+    // ★★ Removed, moved to spacesService.js ★★
     // async function updateSessionWindowId(sessionId, windowId) {
     //     const session = spacesService.getSessionBySessionId(sessionId);
     //     if (session) {
