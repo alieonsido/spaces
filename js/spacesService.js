@@ -440,15 +440,18 @@ export var spacesService = {
     },
 
     /**
-     * Handle window focus events
+     * Handle window focus change events
      * Updates session access times and handles UI updates
      */
     handleWindowFocussed: (windowId) => {
+        // Skip if windowId is invalid
         if (windowId <= 0) return;
 
+        // Find the corresponding session by windowId
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
 
+        // Skip DB update if this session hasn't been written to IndexedDB yet (session.id = false)
         if (!session.id) {
             if (spacesService.debug) {
                 console.warn('[spacesService] handleWindowFocussed: temporary session, skip DB update');
@@ -456,8 +459,10 @@ export var spacesService = {
             return;
         }
 
+        // Use queue mechanism to ensure only one update operation is processed at a time
         spacesService.queue.push(async () => {
             try {
+                // First fetch the latest session state from DB (dbSession)
                 const dbSession = await new Promise(resolve => {
                     dbService.fetchSessionById(session.id, found => resolve(found));
                 });
@@ -466,15 +471,22 @@ export var spacesService = {
                     return;
                 }
 
-                if (session.name && session.name.trim() !== '' && session.name !== dbSession.name) {
+                // --------------------- Fix: Prevent overwriting existing sessionName with empty name ---------------------
+                // If memory has a valid sessionName (non-empty), prioritize it and write back to DB
+                if (session.name && session.name.trim() !== '') {
                     dbSession.name = session.name;
-                } else {
+                } 
+                // Otherwise, if DB has a stored name (non-empty), update memory with DB's name
+                else if (dbSession.name && dbSession.name.trim() !== '') {
                     session.name = dbSession.name;
                 }
+                // ----------------------------------------------------------------------------------------------
 
+                // Synchronously update lastAccess and windowId
                 session.lastAccess = new Date();
                 session.windowId = windowId;
 
+                // Write session back to DB
                 await new Promise((resolve, reject) => {
                     dbService.updateSession(session, updated => {
                         if (!updated) {
@@ -485,11 +497,12 @@ export var spacesService = {
                     });
                 });
 
-                // 發送更新事件給 UI，但避免錯誤
+                // Notify frontend UI (spaces.html etc) to update; if UI is not open, will receive "Receiving end does not exist."
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
                 }, () => {
+                    // Log the status to avoid misidentifying it as a critical error
                     if (chrome.runtime.lastError) {
                         console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
                     }
@@ -498,11 +511,13 @@ export var spacesService = {
             } catch (error) {
                 console.error('Error in handleWindowFocussed:', error);
             } finally {
+                // Finally, close the processing state and continue processing the next queue
                 spacesService.isProcessing = false;
                 spacesService.processQueue();
             }
         });
 
+        // If not currently processing any queue, start processQueue immediately
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
