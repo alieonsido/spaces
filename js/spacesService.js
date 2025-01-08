@@ -405,38 +405,41 @@ export var spacesService = {
      * Updates session state and handles cleanup
      */
     handleWindowRemoved: (windowId, markAsClosed, callback) => {
-        if (spacesService.closedWindowIds[windowId]) {
-            callback();
-        }
-
         if (spacesService.debug) {
             console.log(`handlingWindowRemoved event. windowId: ${windowId}`);
         }
-
-        if (markAsClosed) {
-            if (spacesService.debug) {
-                console.log(`adding window to closedWindowIds: ${windowId}`);
+    
+        // if windowId still exists, skip removing session
+        chrome.windows.getAll({}, allWins => {
+            const stillExists = allWins.some(w => w.id === windowId);
+            if (stillExists && spacesService.debug) {
+                console.log(`windowId ${windowId} still exists, skip removing session`);
             }
-            spacesService.closedWindowIds[windowId] = true;
-            clearTimeout(spacesService.sessionUpdateTimers[windowId]);
-        }
-
-        const session = spacesService.getSessionByWindowId(windowId);
-        if (session) {
-            if (session.id) {
-                session.windowId = false;
-            } else {
-                spacesService.sessions.some((curSession, index) => {
-                    if (curSession.windowId === windowId) {
-                        spacesService.sessions.splice(index, 1);
-                        return true;
+            if (stillExists) {
+                callback();
+                return;
+            }
+    
+            // if windowId really doesn't exist, reset session.windowId
+            if (markAsClosed) {
+                spacesService.closedWindowIds[windowId] = true;
+                clearTimeout(spacesService.sessionUpdateTimers[windowId]);
+            }
+    
+            const session = spacesService.getSessionByWindowId(windowId);
+            if (session) {
+                if (session.id) {
+                    session.windowId = false;
+                } else {
+                    // delete temporary session
+                    const idx = spacesService.sessions.findIndex(s => s.windowId === windowId);
+                    if (idx >= 0) {
+                        spacesService.sessions.splice(idx, 1);
                     }
-                    return false;
-                });
+                }
             }
-        }
-
-        callback();
+            callback();
+        });
     },
 
     /**
@@ -543,10 +546,12 @@ export var spacesService = {
      */
     handleWindowEvent: (windowId, eventId, callback) => {
         callback = typeof callback !== 'function' ? spacesService.noop : callback;
+    
         if (spacesService.debug) {
             console.log('------------------------------------------------');
             console.log(`event: ${eventId}. attempting session update. windowId: ${windowId}`);
         }
+    
         if (!windowId || windowId <= 0) {
             if (spacesService.debug) {
                 console.log(`received an event for invalid windowId: ${windowId}`);
@@ -554,29 +559,32 @@ export var spacesService = {
             return;
         }
     
-        chrome.windows.get(windowId, { populate: true }, (curWindow) => {
-            if (chrome.runtime.lastError) {
-                console.warn(`[handleWindowEvent] ${chrome.runtime.lastError.message}. Skip event.`);
-                spacesService.handleWindowRemoved(windowId, false, spacesService.noop);
-                return;
-            }
-            if (!curWindow) return;
-    
-            if (spacesService.filterInternalWindows(curWindow)) {
-                return;
-            }
-    
-            if (spacesService.closedWindowIds[windowId]) {
+        // wrap a function, only handle "get curWindow" logic
+        function doHandleValidWindow(curWindow, eventId, callback) {
+            if (!curWindow) {
                 if (spacesService.debug) {
-                    console.log(`Ignoring event because windowId ${windowId} is marked as closed.`);
+                    console.log('[doHandleValidWindow] curWindow is null/undefined, skip');
                 }
                 return;
             }
     
-            const session = spacesService.getSessionByWindowId(windowId);
+            if (spacesService.filterInternalWindows(curWindow)) {
+                // if this window is extension internal, skip
+                return;
+            }
+    
+            if (spacesService.closedWindowIds[curWindow.id]) {
+                if (spacesService.debug) {
+                    console.log(`Ignoring event because windowId ${curWindow.id} is marked as closed.`);
+                }
+                return;
+            }
+    
+            // find corresponding session
+            const session = spacesService.getSessionByWindowId(curWindow.id);
     
             if (session) {
-                // Update tabs and history
+                // update session's tabs、history
                 if (spacesService.debug) {
                     console.log(
                         `tab statuses: ${curWindow.tabs
@@ -586,62 +594,96 @@ export var spacesService = {
                 }
     
                 const historyItems = spacesService.historyQueue.filter(
-                    historyItem => historyItem.windowId === windowId
+                    historyItem => historyItem.windowId === curWindow.id
                 );
     
                 for (let i = historyItems.length - 1; i >= 0; i -= 1) {
                     const historyItem = historyItems[i];
-    
                     if (historyItem.action === 'add') {
-                        spacesService.addUrlToSessionHistory(
-                            session,
-                            historyItem.url
-                        );
+                        spacesService.addUrlToSessionHistory(session, historyItem.url);
                     } else if (historyItem.action === 'remove') {
-                        spacesService.removeUrlFromSessionHistory(
-                            session,
-                            historyItem.url
-                        );
+                        spacesService.removeUrlFromSessionHistory(session, historyItem.url);
                     }
                     spacesService.historyQueue.splice(i, 1);
                 }
     
+                // update session's tabs status
                 session.tabs = curWindow.tabs.map(t => ({
                     ...t,
                     pinned: t.pinned
                 }));
+    
+                // recalculate hash
                 session.sessionHash = spacesService.generateSessionHash(session.tabs);
     
-                // ① If session already has an ID, save updates directly
+                // A) already has id in DB -> update it
                 if (session.id) {
                     spacesService.saveExistingSession(session.id);
-                }
-                // ② If session is temporary but has a name (session.name non-empty), save it to DB immediately to avoid being overwritten by subsequent logic
+                } 
+                // C) has name but id = false -> save it to DB to avoid being unnamed
                 else if (session.name && session.name.trim() !== '') {
+                    if (spacesService.debug) {
+                        console.log(
+                            `[handleWindowEvent] session with name "${session.name}" but no ID yet, saving new session...`
+                        );
+                    }
                     spacesService.saveNewSession(session.name, session.tabs, session.windowId, () => {
-                        // Execute callback regardless of success or failure
                         callback();
                     });
                 }
+    
             }
     
-            // If there's no session or session.id=false and no name, check for auto-matching or create temporary storage
+            // if no corresponding session, or session.id=false(temporary) but also no name, check if need createTemporaryUnmatchedSession
             if (!session || !session.id) {
                 if (spacesService.debug) {
-                    console.log('session check triggered');
+                    console.log('session check triggered - attempting checkForSessionMatch');
                 }
-                const currentName = session ? session.name : false;
+                const oldName = session ? session.name : false;
                 spacesService.checkForSessionMatch(curWindow);
-    
-                // If the window originally had a temporary name, carry it over to the newly matched session
-                if (currentName) {
+                if (oldName) {
+                    // if old temporary session has a name, bring it to new session
                     const newSession = spacesService.getSessionByWindowId(curWindow.id);
                     if (newSession) {
-                        newSession.name = currentName;
+                        newSession.name = oldName;
                     }
                 }
             }
+    
+            // normal end
             callback();
+        }
+    
+        // main logic: first get windowId's window
+        chrome.windows.get(windowId, { populate: true }, (curWindow) => {
+            if (chrome.runtime.lastError) {
+                const errMsg = chrome.runtime.lastError.message || '';
+                console.warn(`[handleWindowEvent] ${errMsg} - Will re-check after 500ms`);
+    
+                // A.1) 500ms 後再重試一次
+                setTimeout(() => {
+                    chrome.windows.get(windowId, { populate: true }, (reCheckWindow) => {
+                        if (chrome.runtime.lastError || !reCheckWindow) {
+                            // A.2) if re-check failed, this window really doesn't exist, remove it
+                            const reErrMsg = chrome.runtime.lastError ? chrome.runtime.lastError.message : '';
+                            console.warn(`[handleWindowEvent] Re-check failed. ${reErrMsg} Removing windowId: ${windowId}`);
+                            spacesService.handleWindowRemoved(windowId, true, spacesService.noop);
+                        } else {
+                            // A.3) if re-check success, execute our logic
+                            if (spacesService.debug) {
+                                console.log('[handleWindowEvent] Window re-check success! windowId=' + windowId);
+                            }
+                            doHandleValidWindow(reCheckWindow, eventId, callback);
+                        }
+                    });
+                }, 500);
+    
+                // return first, wait 500ms then execute
+                return;
+            }
+    
+            // if no error, and curWindow exists, execute
+            doHandleValidWindow(curWindow, eventId, callback);
         });
     },
 
