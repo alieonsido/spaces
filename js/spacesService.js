@@ -241,22 +241,33 @@ export var spacesService = {
      */
     matchSessionToWindow: (session, curWindow) => {
         let oldSessionName = false;
-        
+    
         for (let i = spacesService.sessions.length - 1; i >= 0; i--) {
+            // If we find a session that was using the same windowId, handle it carefully
             if (spacesService.sessions[i].windowId === curWindow.id) {
+                // If that session already has an ID (is a DB-saved session), do not forcibly remove it.
+                // We only remove or detach if it's a temporary session (i.e. session.id = false).
                 if (spacesService.sessions[i].id) {
+                    // If it is truly a different DB session, we can safely set its windowId = false
+                    // but only if we confirmed the user isn't actively using it. 
+                    // In many scenarios this might not occur, so we can either skip or do:
                     spacesService.sessions[i].windowId = false;
                 } else {
+                    // If it's just a temporary session, we can remove it from memory
+                    // but remember its name if present
                     oldSessionName = spacesService.sessions[i].name;
                     spacesService.sessions.splice(i, 1);
                 }
             }
         }
-
-        if (!session.name && oldSessionName) {
+    
+        // If the new session doesn't have a name, but we found oldSessionName, we attach that old name.
+        // Otherwise, if the session already has a name, keep it.
+        if ((!session.name || session.name.trim() === '') && oldSessionName) {
             session.name = oldSessionName;
         }
-
+    
+        // Finally, link the session with the current window.
         session.windowId = curWindow.id;
     },
 
@@ -405,22 +416,14 @@ export var spacesService = {
      * Updates session state and handles cleanup
      */
     handleWindowRemoved: (windowId, markAsClosed, callback) => {
-        if (spacesService.debug) {
-            console.log(`handlingWindowRemoved event. windowId: ${windowId}`);
-        }
-    
-        // if windowId still exists, skip removing session
+        if (!windowId) return;
         chrome.windows.getAll({}, allWins => {
             const stillExists = allWins.some(w => w.id === windowId);
-            if (stillExists && spacesService.debug) {
-                console.log(`windowId ${windowId} still exists, skip removing session`);
-            }
             if (stillExists) {
                 callback();
                 return;
             }
     
-            // if windowId really doesn't exist, reset session.windowId
             if (markAsClosed) {
                 spacesService.closedWindowIds[windowId] = true;
                 clearTimeout(spacesService.sessionUpdateTimers[windowId]);
@@ -428,10 +431,11 @@ export var spacesService = {
     
             const session = spacesService.getSessionByWindowId(windowId);
             if (session) {
+                // If the session was a DB session (session.id), just set windowId = false (becomes closed).
                 if (session.id) {
                     session.windowId = false;
                 } else {
-                    // delete temporary session
+                    // If it's a temporary session, remove it from memory entirely
                     const idx = spacesService.sessions.findIndex(s => s.windowId === windowId);
                     if (idx >= 0) {
                         spacesService.sessions.splice(idx, 1);
@@ -447,49 +451,34 @@ export var spacesService = {
      * Updates session access times and handles UI updates
      */
     handleWindowFocussed: (windowId) => {
-        // Skip if windowId is invalid
         if (windowId <= 0) return;
-
-        // Find the corresponding session by windowId
+    
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
-
-        // Skip DB update if this session hasn't been written to IndexedDB yet (session.id = false)
+    
+        // If it's a temporary session with no ID, skip DB sync.
         if (!session.id) {
-            if (spacesService.debug) {
-                console.warn('[spacesService] handleWindowFocussed: temporary session, skip DB update');
-            }
             return;
         }
-
-        // Use queue mechanism to ensure only one update operation is processed at a time
+    
         spacesService.queue.push(async () => {
             try {
-                // First fetch the latest session state from DB (dbSession)
                 const dbSession = await new Promise(resolve => {
                     dbService.fetchSessionById(session.id, found => resolve(found));
                 });
-                if (!dbSession) {
-                    console.warn('[spacesService] handleWindowFocussed: session not found in DB, skip');
-                    return;
-                }
-
-                // --------------------- Fix: Session Name Priority Logic ---------------------
-                // If memory has a valid sessionName (non-empty), prioritize it and write back to DB
+                if (!dbSession) return;
+    
+                // Priority logic:
                 if (session.name && session.name.trim() !== '') {
+                    // If memory has a valid name, store it back to DB
                     dbSession.name = session.name;
-                } 
-                // Otherwise, if DB has a stored name (non-empty), update memory with DB's name
-                else if (dbSession.name && dbSession.name.trim() !== '') {
+                } else if (dbSession.name && dbSession.name.trim() !== '') {
+                    // If DB has a valid name, adopt it into memory
                     session.name = dbSession.name;
                 }
-                // ----------------------------------------------------------------------------------------------
-
-                // Synchronously update lastAccess and windowId
                 session.lastAccess = new Date();
                 session.windowId = windowId;
-
-                // Write session back to DB
+    
                 await new Promise((resolve, reject) => {
                     dbService.updateSession(session, updated => {
                         if (!updated) {
@@ -499,32 +488,29 @@ export var spacesService = {
                         }
                     });
                 });
-
-                // Notify frontend UI to update; if UI is not open, will receive "Receiving end does not exist."
+    
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
                 }, () => {
-                    // Log the status to avoid misidentifying it as a critical error
                     if (chrome.runtime.lastError) {
                         console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
                     }
                 });
-
+    
             } catch (error) {
                 console.error('Error in handleWindowFocussed:', error);
             } finally {
-                // Finally, close the processing state and continue processing the next queue
                 spacesService.isProcessing = false;
                 spacesService.processQueue();
             }
         });
-
-        // If not currently processing any queue, start processQueue immediately
+    
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
     },
+    
 
     /**
      * Queue window events for processing
@@ -546,143 +532,77 @@ export var spacesService = {
      */
     handleWindowEvent: (windowId, eventId, callback) => {
         callback = typeof callback !== 'function' ? spacesService.noop : callback;
+        
+        if (!windowId || windowId <= 0) return;
     
-        if (spacesService.debug) {
-            console.log('------------------------------------------------');
-            console.log(`event: ${eventId}. attempting session update. windowId: ${windowId}`);
-        }
-    
-        if (!windowId || windowId <= 0) {
-            if (spacesService.debug) {
-                console.log(`received an event for invalid windowId: ${windowId}`);
-            }
-            return;
-        }
-    
-        // wrap a function, only handle "get curWindow" logic
         function doHandleValidWindow(curWindow, eventId, callback) {
-            if (!curWindow) {
-                if (spacesService.debug) {
-                    console.log('[doHandleValidWindow] curWindow is null/undefined, skip');
-                }
-                return;
-            }
+            if (!curWindow) return;
+            if (spacesService.filterInternalWindows(curWindow)) return;
     
-            if (spacesService.filterInternalWindows(curWindow)) {
-                // if this window is extension internal, skip
-                return;
-            }
+            if (spacesService.closedWindowIds[curWindow.id]) return;
     
-            if (spacesService.closedWindowIds[curWindow.id]) {
-                if (spacesService.debug) {
-                    console.log(`Ignoring event because windowId ${curWindow.id} is marked as closed.`);
-                }
-                return;
-            }
-    
-            // find corresponding session
+            // find the session
             const session = spacesService.getSessionByWindowId(curWindow.id);
     
             if (session) {
-                // update session's tabs、history
-                if (spacesService.debug) {
-                    console.log(
-                        `tab statuses: ${curWindow.tabs
-                            .map(curTab => curTab.status)
-                            .join('|')}`
-                    );
-                }
-    
+                // 1) update session's history, tabs, sessionHash
                 const historyItems = spacesService.historyQueue.filter(
-                    historyItem => historyItem.windowId === curWindow.id
+                    h => h.windowId === curWindow.id
                 );
-    
-                for (let i = historyItems.length - 1; i >= 0; i -= 1) {
-                    const historyItem = historyItems[i];
-                    if (historyItem.action === 'add') {
-                        spacesService.addUrlToSessionHistory(session, historyItem.url);
-                    } else if (historyItem.action === 'remove') {
-                        spacesService.removeUrlFromSessionHistory(session, historyItem.url);
+                for (let i = historyItems.length - 1; i >= 0; i--) {
+                    const item = historyItems[i];
+                    if (item.action === 'add') {
+                        spacesService.addUrlToSessionHistory(session, item.url);
+                    } else if (item.action === 'remove') {
+                        spacesService.removeUrlFromSessionHistory(session, item.url);
                     }
                     spacesService.historyQueue.splice(i, 1);
                 }
-    
-                // update session's tabs status
-                session.tabs = curWindow.tabs.map(t => ({
-                    ...t,
-                    pinned: t.pinned
-                }));
-    
-                // recalculate hash
+                session.tabs = curWindow.tabs.map(t => ({ ...t, pinned: t.pinned }));
                 session.sessionHash = spacesService.generateSessionHash(session.tabs);
     
-                // A) already has id in DB -> update it
+                // 2) save or update DB if session.id is valid
                 if (session.id) {
-                    spacesService.saveExistingSession(session.id);
-                } 
-                // C) has name but id = false -> save it to DB to avoid being unnamed
-                else if (session.name && session.name.trim() !== '') {
-                    if (spacesService.debug) {
-                        console.log(
-                            `[handleWindowEvent] session with name "${session.name}" but no ID yet, saving new session...`
-                        );
-                    }
+                    spacesService.saveExistingSession(session.id, callback);
+                } else if (session.name && session.name.trim() !== '') {
+                    // no ID yet but has a name => we must create a new DB record
                     spacesService.saveNewSession(session.name, session.tabs, session.windowId, () => {
                         callback();
                     });
                 }
-    
             }
     
-            // if no corresponding session, or session.id=false(temporary) but also no name, check if need createTemporaryUnmatchedSession
+            // if no session => try matchSessionToWindow
             if (!session || !session.id) {
-                if (spacesService.debug) {
-                    console.log('session check triggered - attempting checkForSessionMatch');
-                }
-                const oldName = session ? session.name : false;
+                const oldName = session ? session.name : '';
                 spacesService.checkForSessionMatch(curWindow);
-                if (oldName) {
-                    // if old temporary session has a name, bring it to new session
-                    const newSession = spacesService.getSessionByWindowId(curWindow.id);
-                    if (newSession) {
+                // restore old name if newly matched session is unnamed
+                const newSession = spacesService.getSessionByWindowId(curWindow.id);
+                if (newSession && !newSession.id && oldName) {
+                    if (!newSession.name || newSession.name.trim() === '') {
                         newSession.name = oldName;
                     }
                 }
             }
-    
-            // normal end
             callback();
         }
     
-        // main logic: first get windowId's window
         chrome.windows.get(windowId, { populate: true }, (curWindow) => {
             if (chrome.runtime.lastError) {
                 const errMsg = chrome.runtime.lastError.message || '';
-                console.warn(`[handleWindowEvent] ${errMsg} - Will re-check after 500ms`);
-    
-                // A.1) 500ms 後再重試一次
+                // If we can't get the window now, wait 500ms then re-check.
                 setTimeout(() => {
                     chrome.windows.get(windowId, { populate: true }, (reCheckWindow) => {
                         if (chrome.runtime.lastError || !reCheckWindow) {
-                            // A.2) if re-check failed, this window really doesn't exist, remove it
-                            const reErrMsg = chrome.runtime.lastError ? chrome.runtime.lastError.message : '';
-                            console.warn(`[handleWindowEvent] Re-check failed. ${reErrMsg} Removing windowId: ${windowId}`);
+                            // If still can't find the window, then finalize removal
                             spacesService.handleWindowRemoved(windowId, true, spacesService.noop);
                         } else {
-                            // A.3) if re-check success, execute our logic
-                            if (spacesService.debug) {
-                                console.log('[handleWindowEvent] Window re-check success! windowId=' + windowId);
-                            }
                             doHandleValidWindow(reCheckWindow, eventId, callback);
                         }
                     });
                 }, 500);
-    
-                // return first, wait 500ms then execute
                 return;
             }
-    
-            // if no error, and curWindow exists, execute
             doHandleValidWindow(curWindow, eventId, callback);
         });
     },
