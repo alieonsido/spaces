@@ -451,69 +451,91 @@ export var spacesService = {
      * Updates session access times and handles UI updates
      */
     handleWindowFocussed: (windowId) => {
-	    if (windowId <= 0) return;
+        if (windowId <= 0) return;
 
-	    const session = spacesService.getSessionByWindowId(windowId);
-	    if (!session) return;
+        const session = spacesService.getSessionByWindowId(windowId);
+        if (!session) return;
 
-	    // If it's not stored in DB, skip direct DB sync
-	    if (!session.id) {
-	        return;
-	    }
+        // Remove the restriction "if (!session.id) { return; }" and unify the flow below
 
-	    // Enqueue an async operation to avoid concurrency issues
-	    spacesService.queue.push(async () => {
-	        try {
-	            // Fetch the DB copy to see if there's a name
-	            const dbSession = await new Promise(resolve => {
-	                dbService.fetchSessionById(session.id, found => resolve(found));
-	            });
-	            if (!dbSession) return;
+        spacesService.queue.push(async () => {
+            try {
+                let dbSession = null;
 
-	            // Priority: if memory has a valid name, keep it and store back to DB
-	            if (session.name && session.name.trim() !== '') {
-	                dbSession.name = session.name;
-	            } else if (dbSession.name && dbSession.name.trim() !== '') {
-	                // Else if DB has a valid name, adopt it
-	                session.name = dbSession.name;
-	            }
+                if (session.id) {
+                    // try to fetch the session data by id from DB
+                    dbSession = await new Promise(resolve => {
+                        dbService.fetchSessionById(session.id, found => resolve(found));
+                    });
+                } else if (session.name && session.name.trim() !== '') {
+                    //  if there is no id, but there is a name, try to find the session in DB by name
+                    dbSession = await new Promise(resolve => {
+                        dbService.fetchSessionByName(session.name, found => resolve(found));
+                    });
+                    // if the session with the same name is not found, create a new session in DB
+                    if (!dbSession) {
+                        dbSession = await new Promise(resolve => {
+                            dbService.createSession(session, newSession => {
+                                resolve(newSession);
+                            });
+                        });
+                    }
+                    if (dbSession) {
+                        // add id to memory, so it can be updated and synced
+                        session.id = dbSession.id;
+                    }
+                }
 
-	            session.lastAccess = new Date();
-	            session.windowId = windowId;
+                // if there is a valid session in DB, merge the name
+                if (dbSession) {
+                    // Priority: if there is a valid name in memory, update the DB
+                    if (session.name && session.name.trim() !== '') {
+                        dbSession.name = session.name;
+                    } 
+                    // otherwise, if there is a valid name in DB, but memory is empty, bring the name back
+                    else if (dbSession.name && dbSession.name.trim() !== '') {
+                        session.name = dbSession.name;
+                    }
+                }
 
-	            await new Promise((resolve, reject) => {
-	                dbService.updateSession(session, updated => {
-	                    if (!updated) {
-	                        reject(new Error('[spacesService] Failed to save session on focus.'));
-	                    } else {
-	                        resolve();
-	                    }
-	                });
-	            });
+                session.lastAccess = new Date();
+                session.windowId = windowId;
 
-	            // Fire an updateSpaces message; if front-end doesn't exist, it can be ignored
-	            chrome.runtime.sendMessage({
-	                action: 'updateSpaces',
-	                spaces: spacesService.getAllSessions()
-	            }, () => {
-	                if (chrome.runtime.lastError) {
-	                    console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
-	                }
-	            });
-	        } catch (error) {
-	            console.error('Error in handleWindowFocussed:', error);
-	        } finally {
-	            spacesService.isProcessing = false;
-	            spacesService.processQueue();
-	        }
-	    });
+                // if there is a valid id, sync it to DB
+                if (session.id) {
+                    await new Promise((resolve, reject) => {
+                        dbService.updateSession(session, updated => {
+                            if (!updated) {
+                                reject(new Error('[spacesService] Failed to save session on focus.'));
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
+                }
 
-	    // If not currently processing, start now
-	    if (!spacesService.isProcessing) {
-	        spacesService.processQueue();
-	    }
-	},
-    
+                // Fire an updateSpaces message; if front-end doesn't exist, it can be ignored
+                chrome.runtime.sendMessage({
+                    action: 'updateSpaces',
+                    spaces: spacesService.getAllSessions()
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (error) {
+                console.error('Error in handleWindowFocussed:', error);
+            } finally {
+                spacesService.isProcessing = false;
+                spacesService.processQueue();
+            }
+        });
+
+        // If queue is not deal with: 
+        if (!spacesService.isProcessing) {
+            spacesService.processQueue();
+        }
+    },
 
     /**
      * Queue window events for processing
