@@ -456,7 +456,9 @@ export var spacesService = {
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
 
-        // Remove the restriction "if (!session.id) { return; }" and unify the flow below
+        // *** [Revision Note] Key modification: When current session in memory has no id and name, but there exists 
+        // a session in database with same tabs (matching sessionHash), we will "reconnect" it to that existing DB 
+        // session to avoid showing "(unnamed window)" ***
 
         spacesService.queue.push(async () => {
             try {
@@ -481,10 +483,25 @@ export var spacesService = {
                         });
                     }
                     if (dbSession) {
-                        // add id to memory, so it can be updated and synced
-                        session.id = dbSession.id;
+                        session.id = dbSession.id; // add id to memory, so it can be updated and synced
                     }
                 }
+                
+                // [Revision Note] Added: If session has no id and no non-empty name, try to find a matching session in DB using sessionHash
+                if (!dbSession && (!session.name || session.name.trim() === '')) {
+                    const foundByHash = await new Promise(resolve => {
+                        dbService._fetchAllSessions().then(all => {
+                            const matched = all.find(s => s.sessionHash === session.sessionHash);
+                            resolve(matched || null);
+                        });
+                    });
+                    if (foundByHash) {
+                        dbSession = foundByHash;
+                        session.id = dbSession.id;
+                        session.name = dbSession.name;  // 取回資料庫中的命名
+                    }
+                }
+                // *** [Revision Note] end ***
 
                 // if there is a valid session in DB, merge the name
                 if (dbSession) {
