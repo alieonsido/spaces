@@ -41,7 +41,7 @@ export var spacesService = {
     lastVersion: 0,
     
     // Debug flag for development
-    debug: false,
+    debug: true,
     
     // Queue for processing async operations
     queue: [],
@@ -59,29 +59,34 @@ export var spacesService = {
      * - Matches current windows with saved sessions
      */
     initialiseSpaces: async () => {
-        // update version numbers
+        // Update the extension version number
         spacesService.lastVersion = await spacesService.fetchLastVersion();
         await spacesService.setLastVersion(chrome.runtime.getManifest().version);
-
+    
         dbService.fetchAllSessions(sessions => {
+            // If version is 0.18 and it doesn't match lastVersion, reset all session hashes
             if (
                 chrome.runtime.getManifest().version === '0.18' &&
-                chrome.runtime.getManifest().version !==
-                    spacesService.lastVersion
+                chrome.runtime.getManifest().version !== spacesService.lastVersion
             ) {
                 spacesService.resetAllSessionHashes(sessions);
             }
-
+    
             chrome.windows.getAll({ populate: true }, windows => {
-                // populate session map from database
+                // Load sessions from the DB into memory
                 spacesService.sessions = sessions;
-
-                // clear any previously saved windowIds
+    
+                // 1) Check which window IDs currently exist in Chrome
+                const openWindowIds = windows.map(w => w.id);
+    
+                // 2) If a session points to a window that's no longer open, reset that windowId
                 spacesService.sessions.forEach(session => {
-                    session.windowId = false;
+                    if (session.windowId && !openWindowIds.includes(session.windowId)) {
+                        session.windowId = false;
+                    }
                 });
-
-                // then try to match current open windows with saved sessions
+    
+                // 3) Try to match each open Chrome window to an existing session
                 windows.forEach(curWindow => {
                     if (!spacesService.filterInternalWindows(curWindow)) {
                         spacesService.checkForSessionMatch(curWindow);
@@ -452,25 +457,26 @@ export var spacesService = {
      */
     handleWindowFocussed: (windowId) => {
         if (windowId <= 0) return;
-
+    
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
-
-        // ★★★ [修訂說明] 以下段落：若目前 session 沒有 id / 或有 name 就嘗試接回 DB。
+    
+        // Push to our queue, so it processes sequentially
         spacesService.queue.push(async () => {
             try {
                 let dbSession = null;
-
+    
                 if (session.id) {
-                    // 1) 先嘗試用 session.id 查 DB
+                    // 1) Attempt to fetch the same session from DB by id
                     dbSession = await new Promise(resolve => {
                         dbService.fetchSessionById(session.id, found => resolve(found));
                     });
                 } else if (session.name && session.name.trim() !== '') {
-                    // 2) 如果沒 id 但有 name，就用 name 查；查不到就 create
+                    // 2) If no id but we do have a name, fetch by name
                     dbSession = await new Promise(resolve => {
                         dbService.fetchSessionByName(session.name, found => resolve(found));
                     });
+                    // If not found, create a new session in DB
                     if (!dbSession) {
                         dbSession = await new Promise(resolve => {
                             dbService.createSession(session, newSession => {
@@ -479,11 +485,11 @@ export var spacesService = {
                         });
                     }
                     if (dbSession) {
-                        session.id = dbSession.id; 
+                        session.id = dbSession.id;
                     }
                 }
-
-                // ★★★ 新增：若 session 還是沒有 id、也沒有非空白 name，就嘗試用 sessionHash 找看看
+    
+                // 3) If still no dbSession, try sessionHash fallback
                 if (!dbSession && (!session.name || session.name.trim() === '')) {
                     const foundByHash = await new Promise(resolve => {
                         dbService._fetchAllSessions().then(all => {
@@ -494,11 +500,11 @@ export var spacesService = {
                     if (foundByHash) {
                         dbSession = foundByHash;
                         session.id = dbSession.id;
-                        session.name = dbSession.name; 
+                        session.name = dbSession.name;
                     }
                 }
-
-                // 若成功在 DB 中找到 session，雙向同步 name
+    
+                // 4) If we found something in DB, let's unify the name
                 if (dbSession) {
                     if (session.name && session.name.trim() !== '') {
                         dbSession.name = session.name;
@@ -506,11 +512,12 @@ export var spacesService = {
                         session.name = dbSession.name;
                     }
                 }
-
+    
+                // Update lastAccess time
                 session.lastAccess = new Date();
                 session.windowId = windowId;
-
-                // 存在 id 的情況就存回 DB
+    
+                // If session has an ID, save it to DB
                 if (session.id) {
                     await new Promise((resolve, reject) => {
                         dbService.updateSession(session, updated => {
@@ -522,13 +529,18 @@ export var spacesService = {
                         });
                     });
                 }
-
+    
                 // Fire an updateSpaces message
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
                 }, () => {
-                    if (chrome.runtime.lastError) {
+                    // Ignore if no receiver is open
+                    if (chrome.runtime.lastError &&
+                        chrome.runtime.lastError.message &&
+                        chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
+                        // Do nothing, it's just that the spaces UI is not open
+                    } else if (chrome.runtime.lastError) {
                         console.warn('[handleWindowFocussed] ' + chrome.runtime.lastError.message);
                     }
                 });
@@ -539,7 +551,7 @@ export var spacesService = {
                 spacesService.processQueue();
             }
         });
-
+    
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }

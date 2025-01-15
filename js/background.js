@@ -573,15 +573,26 @@ var spaces = (() => {
      * Update spaces window UI
      * @param {string} source - Source of update trigger
      */
+   /**
+ * Update spaces window UI
+ * @param {string} source - Source of update trigger
+ */
     function updateSpacesWindow(source) {
         if (debug) console.log(`updateSpacesWindow triggered. source: ${source}`);
 
         requestAllSpaces(allSpaces => {
-            // ★★ 這裡加上錯誤防護避免「Receiving end does not exist」★★
+            // Add error handling to avoid "Receiving end does not exist" noise
             chrome.runtime.sendMessage({
                 action: 'updateSpaces',
                 spaces: allSpaces,
             }, () => {
+                if (chrome.runtime.lastError &&
+                    chrome.runtime.lastError.message &&
+                    chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
+                    // This just means there's no open "spaces.html" or extension page
+                    // listening for this message. Safe to ignore.
+                    return;
+                }
                 if (chrome.runtime.lastError) {
                     console.warn('[updateSpacesWindow] ' + chrome.runtime.lastError.message);
                 }
