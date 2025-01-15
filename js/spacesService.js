@@ -456,25 +456,21 @@ export var spacesService = {
         const session = spacesService.getSessionByWindowId(windowId);
         if (!session) return;
 
-        // *** [Revision Note] Key modification: When current session in memory has no id and name, but there exists 
-        // a session in database with same tabs (matching sessionHash), we will "reconnect" it to that existing DB 
-        // session to avoid showing "(unnamed window)" ***
-
+        // ★★★ [修訂說明] 以下段落：若目前 session 沒有 id / 或有 name 就嘗試接回 DB。
         spacesService.queue.push(async () => {
             try {
                 let dbSession = null;
 
                 if (session.id) {
-                    // try to fetch the session data by id from DB
+                    // 1) 先嘗試用 session.id 查 DB
                     dbSession = await new Promise(resolve => {
                         dbService.fetchSessionById(session.id, found => resolve(found));
                     });
                 } else if (session.name && session.name.trim() !== '') {
-                    //  if there is no id, but there is a name, try to find the session in DB by name
+                    // 2) 如果沒 id 但有 name，就用 name 查；查不到就 create
                     dbSession = await new Promise(resolve => {
                         dbService.fetchSessionByName(session.name, found => resolve(found));
                     });
-                    // if the session with the same name is not found, create a new session in DB
                     if (!dbSession) {
                         dbSession = await new Promise(resolve => {
                             dbService.createSession(session, newSession => {
@@ -483,11 +479,11 @@ export var spacesService = {
                         });
                     }
                     if (dbSession) {
-                        session.id = dbSession.id; // add id to memory, so it can be updated and synced
+                        session.id = dbSession.id; 
                     }
                 }
-                
-                // [Revision Note] Added: If session has no id and no non-empty name, try to find a matching session in DB using sessionHash
+
+                // ★★★ 新增：若 session 還是沒有 id、也沒有非空白 name，就嘗試用 sessionHash 找看看
                 if (!dbSession && (!session.name || session.name.trim() === '')) {
                     const foundByHash = await new Promise(resolve => {
                         dbService._fetchAllSessions().then(all => {
@@ -498,19 +494,15 @@ export var spacesService = {
                     if (foundByHash) {
                         dbSession = foundByHash;
                         session.id = dbSession.id;
-                        session.name = dbSession.name;  // 取回資料庫中的命名
+                        session.name = dbSession.name; 
                     }
                 }
-                // *** [Revision Note] end ***
 
-                // if there is a valid session in DB, merge the name
+                // 若成功在 DB 中找到 session，雙向同步 name
                 if (dbSession) {
-                    // Priority: if there is a valid name in memory, update the DB
                     if (session.name && session.name.trim() !== '') {
                         dbSession.name = session.name;
-                    } 
-                    // otherwise, if there is a valid name in DB, but memory is empty, bring the name back
-                    else if (dbSession.name && dbSession.name.trim() !== '') {
+                    } else if (dbSession.name && dbSession.name.trim() !== '') {
                         session.name = dbSession.name;
                     }
                 }
@@ -518,7 +510,7 @@ export var spacesService = {
                 session.lastAccess = new Date();
                 session.windowId = windowId;
 
-                // if there is a valid id, sync it to DB
+                // 存在 id 的情況就存回 DB
                 if (session.id) {
                     await new Promise((resolve, reject) => {
                         dbService.updateSession(session, updated => {
@@ -531,7 +523,7 @@ export var spacesService = {
                     });
                 }
 
-                // Fire an updateSpaces message; if front-end doesn't exist, it can be ignored
+                // Fire an updateSpaces message
                 chrome.runtime.sendMessage({
                     action: 'updateSpaces',
                     spaces: spacesService.getAllSessions()
@@ -548,7 +540,6 @@ export var spacesService = {
             }
         });
 
-        // If queue is not deal with: 
         if (!spacesService.isProcessing) {
             spacesService.processQueue();
         }
@@ -597,7 +588,33 @@ export var spacesService = {
 	            return;
 	        }
 
-	        const session = spacesService.getSessionByWindowId(curWindow.id);
+	        let session = spacesService.getSessionByWindowId(curWindow.id);
+
+	        // ★★★ [修訂說明] 若 session 不存在或 session.name 為空時，再嘗試去 DB 尋找相同 hash 的 session
+	        if (!session || !session.name || session.name.trim() === '') {
+	            const sessionHash = spacesService.generateSessionHash(curWindow.tabs);
+	            const dbCheck = spacesService.sessions.find(
+	                s => s.sessionHash === sessionHash
+	            );
+	            if (dbCheck) {
+	                // 將該視窗附著到這個 dbCheck session
+	                // 先把原本可能暫時在同個 windowId 的 session 移除/分離
+	                spacesService.sessions.forEach(s => {
+	                    if (s !== dbCheck && s.windowId === curWindow.id) {
+	                        if (s.id) {
+	                            s.windowId = false;
+	                        } else {
+	                            const idx = spacesService.sessions.indexOf(s);
+	                            if (idx >= 0) {
+	                                spacesService.sessions.splice(idx, 1);
+	                            }
+	                        }
+	                    }
+	                });
+	                dbCheck.windowId = curWindow.id;
+	                session = dbCheck;
+	            }
+	        }
 
 	        // Update the session if it exists
 	        if (session) {
